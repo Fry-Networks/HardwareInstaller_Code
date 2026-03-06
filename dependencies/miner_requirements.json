@@ -1,0 +1,615 @@
+{
+  "BM": {
+    "name": "Bandwidth Miner",
+    "description": "Network bandwidth monitoring and mining",
+    "group": "Bandwidth",
+    "exclusive": null,
+    "system_packages": {
+      "linux": [
+        "python3-psutil",
+        "python3-requests", 
+        "net-tools",
+        "iperf3"
+      ],
+      "windows": [
+        "python3",
+        "pip"
+      ]
+    },
+    "python_packages": [
+      "psutil>=5.8.0",
+      "requests>=2.25.0",
+      "netifaces>=0.10.0"
+    ],
+    "services": {
+      "linux": ["network-manager", "systemd-networkd"],
+      "windows": []
+    },
+    "permissions": [
+      "network_monitoring",
+      "interface_access"
+    ],
+    "hardware": [
+      "network_interface",
+      "ethernet_adapter"
+    ],
+    "config_files": [
+      "network_interfaces.conf",
+      "bandwidth_thresholds.conf"
+    ],
+    "optional": {
+      "system_packages": {
+        "linux": ["speedtest-cli", "nmap", "tcpdump"],
+        "windows": ["wireshark", "nmap"]
+      },
+      "python_packages": ["speedtest-cli>=2.1.0"],
+      "description": "Enhanced network analysis and testing tools"
+    },
+    "verification": {
+      "commands": ["ip link show", "ping -c 1 8.8.8.8"],
+      "python_imports": ["psutil", "requests"],
+      "hardware_check": "network_interface_detection"
+    }
+  },
+  
+  "IDM": {
+    "name": "Indoor Decibel Miner", 
+    "description": "Indoor audio level monitoring and analysis",
+    "group": "Decibel",
+    "exclusive": "ODM",
+    "system_packages": {
+      "linux": [
+        "python3-sounddevice",
+        "python3-numpy",
+        "alsa-utils",
+        "pulseaudio",
+        "pavucontrol"
+      ],
+      "windows": [
+        "python3",
+        "pip"
+      ]
+    },
+    "python_packages": [
+      "sounddevice>=0.4.0",
+      "numpy>=1.20.0",
+      "scipy>=1.7.0"
+    ],
+    "services": {
+      "linux": ["pulseaudio", "alsa-state"],
+      "windows": ["audiosrv"]
+    },
+    "permissions": [
+      "audio_capture",
+      "microphone_access"
+    ],
+    "hardware": [
+      "microphone",
+      "audio_input_device"
+    ],
+    "exclusive_hardware": [
+      "default_audio_input",
+      "system_microphone"
+    ],
+    "config_files": [
+      "audio_calibration.conf",
+      "decibel_thresholds.conf"
+    ],
+    "optional": {
+      "system_packages": {
+        "linux": ["audacity", "sox", "arecord"],
+        "windows": ["audacity"]
+      },
+      "python_packages": ["librosa>=0.8.0", "matplotlib>=3.3.0"],
+      "description": "Advanced audio analysis and calibration tools"
+    },
+    "verification": {
+      "commands": ["arecord -l", "pactl list sources"],
+      "python_imports": ["sounddevice", "numpy"],
+      "hardware_check": "microphone_detection"
+    },
+    "safety_warnings": [
+      "Ensure microphone sensitivity is properly calibrated",
+      "Avoid exposure to damaging sound levels during testing"
+    ]
+  },
+
+  "ODM": {
+    "name": "Outdoor Decibel Miner",
+    "description": "Outdoor environmental audio monitoring",
+    "group": "Decibel", 
+    "exclusive": "IDM",
+    "system_packages": {
+      "linux": [
+        "python3-sounddevice",
+        "python3-numpy",
+        "alsa-utils"
+      ],
+      "windows": [
+        "python3",
+        "pip"
+      ]
+    },
+    "python_packages": [
+      "sounddevice>=0.4.0",
+      "numpy>=1.20.0",
+      "scipy>=1.7.0"
+    ],
+    "services": {
+      "linux": ["alsa-state"],
+      "windows": ["audiosrv"]
+    },
+    "permissions": [
+      "audio_capture",
+      "external_microphone_access"
+    ],
+    "hardware": [
+      "external_microphone",
+      "weatherproof_audio_interface",
+      "usb_audio_device"
+    ],
+    "exclusive_hardware": [
+      "default_audio_input",
+      "system_microphone"
+    ],
+    "config_files": [
+      "outdoor_audio_calibration.conf",
+      "weather_compensation.conf"
+    ],
+    "optional": {
+      "system_packages": {
+        "linux": ["sox", "arecord"],
+        "windows": []
+      },
+      "python_packages": ["librosa>=0.8.0"],
+      "description": "Environmental audio analysis tools"
+    },
+    "verification": {
+      "commands": ["arecord -l"],
+      "python_imports": ["sounddevice", "numpy"],
+      "hardware_check": "external_microphone_detection"
+    },
+    "environmental_requirements": [
+      "Weatherproof housing for outdoor microphone",
+      "Stable power supply for continuous operation",
+      "Protection from electromagnetic interference"
+    ]
+  },
+
+  "ISM": {
+    "name": "Indoor Satellite Miner",
+    "description": "Indoor GNSS/satellite signal analysis", 
+    "group": "Satellite",
+    "exclusive": "OSM",
+    "system_packages": {
+      "linux": [
+        "python3-serial",
+        "python3-pyproj",
+        "gpsd",
+        "gpsd-clients",
+        "python3-gps"
+      ],
+      "windows": [
+        "python3",
+        "pip"
+      ]
+    },
+    "python_packages": [
+      "pyserial>=3.5",
+      "pyproj>=3.0.0",
+      "pynmea2>=1.18.0"
+    ],
+    "services": {
+      "linux": ["gpsd"],
+      "windows": []
+    },
+    "permissions": [
+      "serial_access",
+      "gps_access",
+      "usb_device_access"
+    ],
+    "hardware": [
+      "gnss_receiver",
+      "usb_ports",
+      "serial_interface"
+    ],
+    "exclusive_hardware": [
+      "gnss_receiver_primary",
+      "gps_antenna"
+    ],
+    "config_files": [
+      "gnss_receiver.conf",
+      "satellite_constellation.conf"
+    ],
+    "optional": {
+      "system_packages": {
+        "linux": ["gpsmon", "cgps", "python3-folium"],
+        "windows": []
+      },
+      "python_packages": ["folium>=0.12.0", "geopy>=2.1.0"],
+      "description": "GNSS monitoring and visualization tools"
+    },
+    "verification": {
+      "commands": ["lsusb", "gpsd -V"],
+      "python_imports": ["serial", "pyproj", "pynmea2"],
+      "hardware_check": "gnss_receiver_detection"
+    },
+    "positioning_requirements": [
+      "Clear view of sky for satellite reception",
+      "Minimal multipath interference indoors",
+      "Stable antenna positioning"
+    ]
+  },
+
+  "OSM": {
+    "name": "Outdoor Satellite Miner",
+    "description": "Outdoor GNSS/satellite signal analysis",
+    "group": "Satellite",
+    "exclusive": "ISM", 
+    "system_packages": {
+      "linux": [
+        "python3-serial",
+        "python3-pyproj", 
+        "gpsd",
+        "gpsd-clients",
+        "python3-gps"
+      ],
+      "windows": [
+        "python3",
+        "pip"
+      ]
+    },
+    "python_packages": [
+      "pyserial>=3.5",
+      "pyproj>=3.0.0",
+      "pynmea2>=1.18.0"
+    ],
+    "services": {
+      "linux": ["gpsd"],
+      "windows": []
+    },
+    "permissions": [
+      "serial_access",
+      "gps_access",
+      "usb_device_access"
+    ],
+    "hardware": [
+      "external_gnss_receiver",
+      "outdoor_antenna",
+      "usb_ports"
+    ],
+    "exclusive_hardware": [
+      "gnss_receiver_primary",
+      "gps_antenna"
+    ],
+    "config_files": [
+      "outdoor_gnss_receiver.conf",
+      "multi_constellation.conf"
+    ],
+    "optional": {
+      "system_packages": {
+        "linux": ["gpsmon", "cgps", "rtklib"],
+        "windows": ["rtklib"]
+      },
+      "python_packages": ["folium>=0.12.0", "geopy>=2.1.0"],
+      "description": "Advanced GNSS analysis and RTK positioning"
+    },
+    "verification": {
+      "commands": ["lsusb", "gpsd -V"],
+      "python_imports": ["serial", "pyproj", "pynmea2"],
+      "hardware_check": "external_gnss_detection"
+    },
+    "environmental_requirements": [
+      "Unobstructed sky view for optimal satellite reception",
+      "Weather-resistant antenna installation", 
+      "Lightning protection for outdoor equipment"
+    ]
+  },
+
+  "RDN": {
+    "name": "Router Data Node",
+    "description": "Network router data collection and analysis",
+    "group": "Bandwidth",
+    "exclusive": null,
+    "system_packages": {
+      "linux": [
+        "python3-requests",
+        "python3-paramiko",
+        "snmp",
+        "snmp-mibs-downloader"
+      ],
+      "windows": [
+        "python3",
+        "pip"
+      ]
+    },
+    "python_packages": [
+      "requests>=2.25.0",
+      "paramiko>=2.7.0",
+      "pysnmp>=4.4.0",
+      "netmiko>=3.4.0"
+    ],
+    "services": {
+      "linux": ["snmpd"],
+      "windows": ["snmp"]
+    },
+    "permissions": [
+      "network_admin",
+      "snmp_access",
+      "ssh_access"
+    ],
+    "hardware": [
+      "network_interface",
+      "router_access"
+    ],
+    "config_files": [
+      "router_credentials.conf",
+      "snmp_community.conf"
+    ],
+    "optional": {
+      "system_packages": {
+        "linux": ["nmap", "traceroute", "mtr"],
+        "windows": ["nmap"]
+      },
+      "python_packages": ["scapy>=2.4.0"],
+      "description": "Advanced network scanning and analysis tools"
+    },
+    "verification": {
+      "commands": ["snmpget -v2c -c public localhost 1.3.6.1.2.1.1.1.0"],
+      "python_imports": ["requests", "paramiko", "pysnmp"],
+      "hardware_check": "router_connectivity"
+    },
+    "security_requirements": [
+      "Secure storage of router credentials",
+      "Encrypted communication channels",
+      "Regular security audit of access permissions"
+    ]
+  },
+
+  "SVN": {
+    "name": "Satellite Vehicle Node", 
+    "description": "Satellite vehicle data processing and analysis",
+    "group": "Satellite",
+    "exclusive": null,
+    "system_packages": {
+      "linux": [
+        "python3-numpy",
+        "python3-scipy",
+        "python3-orbital"
+      ],
+      "windows": [
+        "python3",
+        "pip"
+      ]
+    },
+    "python_packages": [
+      "numpy>=1.20.0",
+      "scipy>=1.7.0",
+      "skyfield>=1.35",
+      "pyephem>=3.7.7"
+    ],
+    "services": {
+      "linux": [],
+      "windows": []
+    },
+    "permissions": [
+      "internet_access",
+      "file_system_access"
+    ],
+    "hardware": [
+      "high_performance_cpu",
+      "sufficient_ram"
+    ],
+    "config_files": [
+      "orbital_elements.conf",
+      "satellite_catalog.conf"
+    ],
+    "optional": {
+      "system_packages": {
+        "linux": ["python3-matplotlib", "python3-cartopy"],
+        "windows": []
+      },
+      "python_packages": ["matplotlib>=3.3.0", "cartopy>=0.18.0"],
+      "description": "Satellite visualization and tracking tools"
+    },
+    "verification": {
+      "commands": [],
+      "python_imports": ["numpy", "scipy", "skyfield"],
+      "hardware_check": "computational_requirements"
+    },
+    "data_requirements": [
+      "Regular updates of satellite orbital elements",
+      "Access to satellite catalog databases",
+      "Time synchronization for accurate predictions"
+    ]
+  },
+
+  "SDN": {
+    "name": "Sensor Data Node",
+    "description": "Multi-sensor data aggregation and processing",
+    "group": "Bandwidth", 
+    "exclusive": null,
+    "system_packages": {
+      "linux": [
+        "python3-serial",
+        "python3-numpy",
+        "i2c-tools",
+        "python3-smbus"
+      ],
+      "windows": [
+        "python3",
+        "pip"
+      ]
+    },
+    "python_packages": [
+      "pyserial>=3.5",
+      "numpy>=1.20.0",
+      "adafruit-circuitpython-busdevice>=5.0.0"
+    ],
+    "services": {
+      "linux": [],
+      "windows": []
+    },
+    "permissions": [
+      "i2c_access",
+      "spi_access", 
+      "gpio_access",
+      "serial_access"
+    ],
+    "hardware": [
+      "i2c_bus",
+      "spi_bus",
+      "gpio_pins",
+      "sensor_interfaces"
+    ],
+    "config_files": [
+      "sensor_mapping.conf",
+      "calibration_data.conf"
+    ],
+    "optional": {
+      "system_packages": {
+        "linux": ["python3-spidev", "python3-rpi.gpio"],
+        "windows": []
+      },
+      "python_packages": ["spidev>=3.5", "RPi.GPIO>=0.7.0"],
+      "description": "Extended sensor interface support"
+    },
+    "verification": {
+      "commands": ["i2cdetect -y 1", "lsmod | grep i2c"],
+      "python_imports": ["serial", "numpy"],
+      "hardware_check": "sensor_bus_detection"
+    },
+    "sensor_requirements": [
+      "Proper sensor calibration before deployment",
+      "Environmental protection for sensitive sensors",
+      "Regular maintenance and recalibration schedule"
+    ]
+  },
+
+  "AEM": {
+    "name": "Atmospheric Environment Miner",
+    "description": "Environmental data collection and analysis",
+    "group": "AIEdge",
+    "exclusive": null,
+    "system_packages": {
+      "linux": [
+        "python3-serial",
+        "python3-numpy",
+        "i2c-tools",
+        "python3-smbus"
+      ],
+      "windows": [
+        "python3",
+        "pip"
+      ]
+    },
+    "python_packages": [
+      "pyserial>=3.5",
+      "numpy>=1.20.0",
+      "adafruit-circuitpython-bme280>=2.6.0"
+    ],
+    "services": {
+      "linux": [],
+      "windows": []
+    },
+    "permissions": [
+      "i2c_access",
+      "serial_access",
+      "sensor_access"
+    ],
+    "hardware": [
+      "environmental_sensors",
+      "i2c_bus",
+      "temperature_sensor",
+      "humidity_sensor", 
+      "pressure_sensor"
+    ],
+    "config_files": [
+      "environmental_calibration.conf",
+      "sensor_thresholds.conf"
+    ],
+    "optional": {
+      "system_packages": {
+        "linux": ["python3-w1thermsensor", "python3-spidev"],
+        "windows": []
+      },
+      "python_packages": ["w1thermsensor>=2.0.0", "spidev>=3.5"],
+      "description": "Additional environmental sensor support"
+    },
+    "verification": {
+      "commands": ["i2cdetect -y 1"],
+      "python_imports": ["serial", "numpy"],
+      "hardware_check": "environmental_sensor_detection"
+    },
+    "environmental_requirements": [
+      "Sensor placement away from heat sources",
+      "Protection from direct sunlight and precipitation",
+      "Adequate ventilation for accurate readings"
+    ]
+  },
+
+  "IRM": {
+    "name": "Indoor Radiation Miner",
+    "description": "Indoor radiation level monitoring and logging",
+    "group": "Radiation",
+    "exclusive": null,
+    "system_packages": {
+      "linux": [
+        "python3-serial",
+        "python3-numpy"
+      ],
+      "windows": [
+        "python3",
+        "pip"
+      ]
+    },
+    "python_packages": [
+      "pyserial>=3.5",
+      "numpy>=1.20.0"
+    ],
+    "services": {
+      "linux": [],
+      "windows": []
+    },
+    "permissions": [
+      "serial_access",
+      "usb_device_access"
+    ],
+    "hardware": [
+      "geiger_counter",
+      "radiation_detector",
+      "usb_ports"
+    ],
+    "config_files": [
+      "radiation_calibration.conf",
+      "safety_thresholds.conf"
+    ],
+    "optional": {
+      "system_packages": {
+        "linux": ["python3-matplotlib"],
+        "windows": []
+      },
+      "python_packages": ["matplotlib>=3.3.0"],
+      "description": "Radiation data visualization tools"
+    },
+    "verification": {
+      "commands": ["lsusb"],
+      "python_imports": ["serial", "numpy"],
+      "hardware_check": "geiger_counter_detection"
+    },
+    "safety_warnings": [
+      "⚠️ RADIATION SAFETY: Ensure proper radiation safety protocols are followed",
+      "⚠️ CALIBRATION: Calibrate Geiger counter with known radiation source before use",
+      "⚠️ MONITORING: Continuously monitor radiation exposure levels",
+      "⚠️ EMERGENCY: Have emergency procedures in place for high radiation detection",
+      "⚠️ TRAINING: Ensure operators are trained in radiation safety procedures"
+    ],
+    "safety_requirements": [
+      "Radiation safety officer approval for deployment",
+      "Regular calibration with certified radiation sources",
+      "Emergency response plan for radiation incidents",
+      "Personal dosimeter badges for operators",
+      "Documented safety procedures and training records"
+    ]
+  }
+}

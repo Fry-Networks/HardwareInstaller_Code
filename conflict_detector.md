@@ -1,0 +1,7 @@
+ConflictDetector.check_device_conflicts runs before we let the installer proceed; after parsing and validating the miner key it issues a “global instance” probe: it generates a temporary install_id, then calls self.api_client.has_other_active_installation(new_key, install_id) and, when that returns true, flags the conflict as type: "active_instance" with global_conflict=True so the UI can block the install and tell the user that the miner key is active elsewhere (core/conflict_detector.py (line 170)).
+
+ExternalApiClient.has_other_active_installation is simply a convenience wrapper around the lease endpoint: it calls lease_status(miner_key) and returns true when the backend reports an active lease held by an install_id that differs from the one we are trying to use (tools/external_api.py (line 202)). So, yes, the conflict detector is piggybacking on the same lease-status data—you were right about that.
+
+What the conflict detector does not do is manage the lease itself. The actual enforcement happens later in ServiceManager.install() where we reuse/persist the real install_id, fetch the current lease holder, and either renew or acquire the lease. If the backend says another machine still holds it, we stop the install and display the remediation guidance (core/service_manager.py (line 741)).
+
+In short: conflict detection uses lease status as a pre-flight sanity check to surface “already-running-on-another-machine” errors early in the UI, while the service manager performs the authoritative lease acquisition/renewal (and can’t be bypassed).

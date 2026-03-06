@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+    Id="*"
+    Name="FryNetworks Installer"
+    Language="1033"
+    Version="$(var.ProductVersion)"
+    Manufacturer="$(var.Manufacturer)"
+    UpgradeCode="70f2e3ae-27ad-4b75-a323-4ca81cc91f78">
+
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of FryNetworks Installer is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" CabinetTemplate="cab{0}.cab" />
+
+    <!-- Assets -->
+    <Icon Id="ProductIcon" SourceFile="..\resources\frynetworks_logo.ico" />
+    <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
+    <!-- 493x312 dialog, 493x58 banner -->
+    <WixVariable Id="WixUIDialogBmp" Value="..\resources\wix_dialog_welcome.bmp" />
+    <WixVariable Id="WixUIBannerBmp" Value="..\resources\wix_banner.bmp" />
+    <!-- Custom EULA -->
+    <WixVariable Id="WixUILicenseRtf" Value="..\resources\license.rtf" />
+
+    <!-- UI props -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Enable automatic updates" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <!-- Disable built-in path validation to avoid Browse dialog 2819 when changing install folder -->
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <Property Id="WixQuietExecCmdLine" Value="&quot;[SystemFolder]cmd.exe&quot; /c &quot;start &quot;&quot;&quot;&quot; /b &quot;[#InstallerExeFile]&quot; &gt; &quot;%TEMP%\\fry_launch.log&quot; 2&gt;&amp;1&quot;" />
+    <!-- Preserve/restore install folder for upgrades -->
+    <Property Id="INSTALLFOLDER">
+      <RegistrySearch Id="REG_INSTALLDIR" Root="HKLM" Key="Software\FryNetworks\Installer" Name="InstallDir" Type="raw" />
+    </Property>
+
+    <!-- Directories -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="FryNetworks Installer" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ProgramMenuDir" Name="FryNetworks Installer" />
+      </Directory>
+    </Directory>
+
+    <!-- Components -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="InstallerExeComponent" Guid="4a8f6261-3e0d-4b72-9612-4dc5b6e2b5a6">
+        <File Id="InstallerExeFile" Source="$(var.InstallerExe)" Name="$(var.InstallerExeName)" KeyPath="yes" />
+      </Component>
+      <Component Id="UpdaterExeComponent" Guid="7af4f3c3-503a-4d2a-8d29-2ed6250b1ecf">
+        <File Id="UpdaterExeFile" Source="..\dist\frynetworks_updater.exe" Name="frynetworks_updater.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="UpdaterTaskScriptComponent" Guid="0be226f5-8e8a-4c73-9f1c-1bbf31953361">
+        <File Id="RegisterUpdaterScript" Source="..\tools\register_updater_task.ps1" Name="register_updater_task.ps1" KeyPath="yes" />
+      </Component>
+      <Component Id="InstallDirRegistryComponent" Guid="d0cc7ba0-a370-4a0e-a3b1-71f025f83c4b">
+        <RegistryValue Root="HKLM" Key="Software\FryNetworks\Installer" Name="InstallDir" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="ProgramMenuDir">
+      <Component Id="ProgramMenuShortcutComponent" Guid="2f2bcd20-8c43-4c77-9e5d-0c186a5bc90c">
+        <Shortcut
+          Id="ProgramMenuShortcut"
+          Name="FryNetworks Installer"
+          Description="Install and update FryNetworks miners and nodes"
+          Target="[INSTALLFOLDER]$(var.InstallerExeName)"
+          WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="ProgramMenuDir_Remove" Directory="ProgramMenuDir" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\FryNetworks\Installer" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <ComponentGroup Id="ProductComponents">
+      <ComponentRef Id="InstallerExeComponent" />
+      <ComponentRef Id="UpdaterExeComponent" />
+      <ComponentRef Id="UpdaterTaskScriptComponent" />
+      <ComponentRef Id="ProgramMenuShortcutComponent" />
+      <ComponentRef Id="InstallDirRegistryComponent" />
+    </ComponentGroup>
+
+    <Feature Id="Complete" Title="FryNetworks Installer" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+    </Feature>
+    
+    <!-- Allow upgrades via UpgradeCode (MajorUpgrade element handles detection) -->
+
+    <!-- UI: use stock WixUI_InstallDir so Browse/Change behaves correctly -->
+    <UI>
+      <UIRef Id="WixUI_InstallDir" />
+      <!-- finish: optionally launch installer, then close -->
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchInstaller">1</Publish>
+    </UI>
+
+    <CustomAction
+      Id="LaunchInstaller"
+      BinaryKey="WixCA"
+      DllEntry="WixQuietExec"
+      Execute="immediate"
+      Return="ignore"
+      Impersonate="yes" />
+
+    <CustomAction
+      Id="RegisterUpdaterTask"
+      BinaryKey="WixCA"
+      DllEntry="CAQuietExec"
+      Execute="deferred"
+      Return="ignore"
+      Impersonate="no" />
+
+    <CustomAction Id="SetRegisterUpdaterTask" Property="RegisterUpdaterTask" Value="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]register_updater_task.ps1&quot; -UpdaterPath &quot;[INSTALLFOLDER]frynetworks_updater.exe&quot; -TaskName FryNetworksUpdater -RunNow -LogPath &quot;[Temp]fry_updater_task.log&quot;" />
+
+    <CustomAction
+      Id="RemoveUpdaterTask"
+      BinaryKey="WixCA"
+      DllEntry="CAQuietExec"
+      Execute="deferred"
+      Return="ignore"
+      Impersonate="no" />
+
+    <CustomAction Id="SetRemoveUpdaterTask" Property="RemoveUpdaterTask" Value="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]register_updater_task.ps1&quot; -TaskName FryNetworksUpdater -Remove -LogPath &quot;[Temp]fry_updater_task.log&quot;" />
+
+    <!-- sequences: rely on stock WixUI_InstallDir ordering -->
+
+    <InstallExecuteSequence>
+      <Custom Action="SetRegisterUpdaterTask" Before="RegisterUpdaterTask">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT REMOVE</Custom>
+      <Custom Action="RegisterUpdaterTask" Before="InstallFinalize">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT REMOVE</Custom>
+      <Custom Action="SetRemoveUpdaterTask" Before="RemoveUpdaterTask">REMOVE="ALL"</Custom>
+      <Custom Action="RemoveUpdaterTask" Before="RemoveFiles">REMOVE="ALL"</Custom>
+    </InstallExecuteSequence>
+
+  </Product>
+</Wix>
