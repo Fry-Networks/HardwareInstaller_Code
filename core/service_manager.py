@@ -40,17 +40,17 @@ from tools.external_api import (
 
 
 """
-Resolve GitHub owner/repo/branch and token for downloading miner GUI release assets.
+Resolve GitHub owner/repo/branch and optional token for downloading miner GUI release assets.
 
 Resolution order (per install attempt):
  1) explicit options passed to install_service (github_repo/github_path or github_owner/github_repo, github_token)
  2) environment variables: GITHUB_REPO_PATH (owner/repo), GITHUB_OWNER, GITHUB_REPO, GITHUB_BRANCH
     and GITHUB_TOKEN / GH_TOKEN
- 3) 1Password via the CLI reference keys (op://VSCode/hardware_exe/Github_repo_test and op://VSCode/hardware_exe/Github_token)
+ 3) 1Password via the CLI reference keys for repo path (op://VSCode/hardware_exe/Github_repo_test)
     (uses helper in external_api._get_1password_secret)
  4) embedded build_config.json github section (created at build time by build_installer.ps1)
 
-This avoids hard-coding owner/repo in source and prefers 1Password values when available.
+Note: GitHub tokens are no longer required since the repositories are public.
 """
 
 
@@ -110,10 +110,6 @@ def _resolve_github_info(options: dict, repo_type: str) -> tuple[Optional[str], 
                 if gh_path and '/' in gh_path:
                     parts = gh_path.split('/', 1)
                     owner, repo = parts[0].strip(), parts[1].strip()
-            if not token:
-                gh_token = _get_1password_secret('op://VSCode/hardware_exe/Github_token')
-                if gh_token:
-                    token = gh_token.strip()
     except Exception:
         # If external_api or op CLI isn't available, ignore and continue
         pass

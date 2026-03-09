@@ -8,7 +8,7 @@ Version follows semantic versioning: MAJOR.MINOR.PATCH
 import sys
 from typing import Optional, Tuple
 
-WINDOWS_VERSION = "4.0.9"
+WINDOWS_VERSION = "1.0.0"
 LINUX_VERSION = "1.1.4"
 __build_date__ = None  # Set during build process
 

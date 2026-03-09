@@ -20,18 +20,10 @@ powershell -ExecutionPolicy Bypass -File tools/register_updater_task.ps1 `
 ```
 Options: `-RunNow` to trigger immediately, `-Remove` to delete the task.
 
-Private repo token:
-```powershell
-powershell -ExecutionPolicy Bypass -File tools/register_updater_task.ps1 `
-  -UpdaterPath "C:\Program Files (x86)\FryNetworks Installer\frynetworks_updater.exe" `
-  -GitHubToken "<your PAT with repo read>"
-```
-The token is injected into the task as `GITHUB_TOKEN` (not baked into the binary).
-
 ## Configuration
 - Repo default: `FryDevsTestingLab/HardwareInstaller` (change in `tools/updater.py` or pass `--repo owner/name`).
 - Version: pass `--current-version vX.Y.Z` or let it infer from `frynetworks_installer_v*.exe` sitting next to `updater.exe`.
-- Auth: set `--token`, `GITHUB_TOKEN`, or bake at build time via `EMBEDDED_GITHUB_TOKEN` env var when running PyInstaller; if releases are private, one of these must be provided.
+- Auth: not required since the repositories are now public. The `--token` and `GITHUB_TOKEN` options still exist for optional use.
 - Quiet install: use `--quiet` (default in the scheduled task).
 
 ## How it works

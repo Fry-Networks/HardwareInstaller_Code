@@ -13,9 +13,11 @@ cp .env.example .env
 The build script requires the following variables in `.env`:
 
 - `OP_BEARER_TOKEN_REF`: 1Password reference for API bearer token
-- `OP_GITHUB_REPO_REF`: 1Password reference for GitHub repository path
-- `OP_GITHUB_TOKEN_REF`: 1Password reference for GitHub personal access token
+- `OP_GUI_GITHUB_REPO_REF`: 1Password reference for GUI GitHub repository path
+- `OP_POC_GITHUB_REPO_REF`: 1Password reference for PoC GitHub repository path
 - `EXTERNAL_API_BASE_URL`: External API endpoint (default: https://hardwareapi.frynetworks.com)
+
+Note: GitHub tokens are no longer needed since the repositories are now public.
 
 ### Build Process
 
@@ -124,16 +126,11 @@ This repository contains a PowerShell build script `build_installer.ps1` that pr
 Important points:
 
 - The installer does NOT embed the miner GUI or service executables by default (this repository may have many GUI/PoC binaries). At runtime the installer downloads the appropriate release assets from GitHub.
-- If your release assets are in a private GitHub repository, the runtime installer needs access to a GitHub token (PAT) in order to download them. To avoid prompting end users for your credentials, the build script embeds a `build_config.json` into the bundled EXE containing the API bearer token and GitHub token. This allows the packaged installer to perform authenticated downloads at runtime.
+- The build script embeds a `build_config.json` into the bundled EXE containing the API bearer token and GitHub repo paths. Since the repositories are now public, no GitHub tokens are needed for runtime downloads.
 - The build script reads secrets from 1Password (via the `op` CLI) at build time. It expects the following 1Password items to exist when you run the build locally or in CI:
 	- `op://VPS/Hardware_API/API_BEARER_TOKEN` — bearer token for external API (embedded in build_config.json)
-	- `op://VSCode/hardware_exe/Github_repo_test` — GitHub owner/repo path (owner/repo)
-	- `op://VSCode/hardware_exe/Github_token` — GitHub PAT used for authenticated runtime downloads
-
-Security guidance:
-
-- Embedding a GitHub PAT in the installer is a convenience to allow end-user installs without any manual configuration. However, embedding credentials increases the attack surface. Prefer to use a scoped, short-lived, least-privilege PAT that only has read access to private release assets. Rotate the token regularly.
-- Alternatively, make the release assets public or host them behind a controlled proxy (CI artifact server) so no token is required at runtime.
+	- `op://VSCode/hardware_exe/Github_repo_test` — GitHub owner/repo path for GUI repo
+	- `op://VSCode/hardware_exe/Github_repo_poc` — GitHub owner/repo path for PoC repo
 
 How to build:
 
@@ -146,10 +143,3 @@ How to build:
 
 The script will create a `build_config.json`, embed it into the PyInstaller bundle, build `dist\frynetworks_installer.exe`, and clean up the temporary `build_config.json` file.
 
-If you prefer not to embed a PAT in the installer, consider one of these approaches:
-
-- Build the installer in a trusted CI/CD environment that retrieves private assets at build time and embeds the assets directly (not recommended for many binaries due to size).
-- Host private assets in a secure artifact repository and make the installer download them from that repository using short-lived credentials or a signed URL.
-- Make the GitHub release assets public.
-
-If you'd like, I can add a CI-friendly variant of `build_installer.ps1` that accepts the GitHub owner/repo and token via secure CI environment variables instead of 1Password, and documents rotating the token.

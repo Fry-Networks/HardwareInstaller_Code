@@ -11,12 +11,9 @@ set -e  # Exit on any error
 
 # 1Password references for retrieving secrets at build time
 export OP_BEARER_TOKEN_REF="op://HardwareAPI/Hardware_API/API_BEARER_TOKEN"
-export OP_GUI_GITHUB_REPO_REF="op://VSCode/hardware_exe/Github_repo_test"
-export OP_GUI_GITHUB_TOKEN_REF="op://VSCode/hardware_exe/Github_token"
+export OP_GUI_GITHUB_REPO_REF="op://VSCode/hardware_exe/Github_repo_hardware_exe"
 export OP_HW_GITHUB_REPO_REF="op://VSCode/hardware_exe/Github_repo_hardwareinstaller"
-export OP_HW_GITHUB_TOKEN_REF="op://VSCode/hardware_exe/Github_token_hardwareinstaller"
-export OP_POC_GITHUB_REPO_REF="op://VSCode/hardware_exe/Github_repo_poc"
-export OP_POC_GITHUB_TOKEN_REF="op://VSCode/hardware_exe/Github_token_poc"
+export OP_POC_GITHUB_REPO_REF="op://VSCode/hardware_exe/Github_repo_hardwarepoc"
 export EXTERNAL_API_BASE_URL="https://hardwareapi.frynetworks.com"
 export OLOSTEP_BROWSER_URL="https://olostepbrowser.s3.us-east-1.amazonaws.com/updates/win32/x64/Olostep-Browser-1.0.1+Setup.exe"
 export OP_HONEYGAIN_KEY_REF="op://Bandwidth Miners/Honeygain SDK API/credential"
@@ -160,22 +157,6 @@ if [ -z "$POC_GITHUB_PATH" ]; then
 fi
 echo -e "${GREEN}  ✓ PoC GitHub path retrieved: $POC_GITHUB_PATH${NC}"
 
-echo -e "\n${YELLOW}[2d/6] Retrieving GUI GitHub PAT from 1Password for build-time asset download...${NC}"
-GUI_GITHUB_PAT=$(op read "$OP_GUI_GITHUB_TOKEN_REF" 2>/dev/null || true)
-if [ -z "$GUI_GITHUB_PAT" ]; then
-    echo -e "${RED}  ✗ Failed to retrieve GUI GitHub PAT from 1Password (needed to download release assets)${NC}"
-    exit 1
-fi
-echo -e "${GREEN}  ✓ GUI GitHub PAT retrieved for build (hidden)${NC}"
-
-echo -e "\n${YELLOW}[2e/6] Retrieving PoC GitHub PAT from 1Password for build-time asset download...${NC}"
-POC_GITHUB_PAT=$(op read "$OP_POC_GITHUB_TOKEN_REF" 2>/dev/null || true)
-if [ -z "$POC_GITHUB_PAT" ]; then
-    echo -e "${RED}  ✗ Failed to retrieve PoC GitHub PAT from 1Password (needed to download release assets)${NC}"
-    exit 1
-fi
-echo -e "${GREEN}  ✓ PoC GitHub PAT retrieved for build (hidden)${NC}"
-
 # Honeygain integration: required to be provided via 1Password for builds
 if [ -z "$OP_HONEYGAIN_KEY_REF" ]; then
     echo -e "\n${RED}  ✗ OP_HONEYGAIN_KEY_REF not set - Honeygain API key must be provided via 1Password${NC}"
@@ -263,12 +244,10 @@ cat > build_config.json << EOF
     },
     "github": {
         "gui": {
-            "path": "$GUI_GITHUB_PATH",
-            "token": "$GUI_GITHUB_PAT"
+            "path": "$GUI_GITHUB_PATH"
         },
         "poc": {
-            "path": "$POC_GITHUB_PATH",
-            "token": "$POC_GITHUB_PAT"
+            "path": "$POC_GITHUB_PATH"
         }
     },
     "encryption": {

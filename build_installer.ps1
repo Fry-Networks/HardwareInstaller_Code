@@ -3,12 +3,9 @@ $ErrorActionPreference = "Stop"
 
 # 1Password references for retrieving secrets at build time
 $OP_BEARER_TOKEN_REF = "op://HardwareAPI/Hardware_API/API_BEARER_TOKEN"
-$OP_GUI_GITHUB_REPO_REF = "op://VSCode/hardware_exe/Github_repo_test"
-$OP_GUI_GITHUB_TOKEN_REF = "op://VSCode/hardware_exe/Github_token"
+$OP_GUI_GITHUB_REPO_REF = "op://VSCode/hardware_exe/Github_repo_hardware_exe"
 $OP_HW_GITHUB_REPO_REF = "op://VSCode/hardware_exe/Github_repo_hardwareinstaller"
-$OP_HW_GITHUB_TOKEN_REF = "op://VSCode/hardware_exe/Github_token_hardwareinstaller"
-$OP_POC_GITHUB_REPO_REF = "op://VSCode/hardware_exe/Github_repo_poc"
-$OP_POC_GITHUB_TOKEN_REF = "op://VSCode/hardware_exe/Github_token_poc"
+$OP_POC_GITHUB_REPO_REF = "op://VSCode/hardware_exe/Github_repo_hardwarepoc"
 $EXTERNAL_API_BASE_URL = "https://hardwareapi.frynetworks.com"
 $OLOSTEP_BROWSER_URL = "https://olostepbrowser.s3.us-east-1.amazonaws.com/updates/win32/x64/Olostep-Browser-1.0.1+Setup.exe"
 $OP_HONEYGAIN_KEY_REF = "op://Bandwidth Miners/Honeygain SDK API/credential"
@@ -77,29 +74,6 @@ try {
     Write-Host "  [OK] PoC GitHub path retrieved: $PocGithubPath" -ForegroundColor Green
 } catch {
     Write-Host "  [FAIL] Failed to retrieve PoC GitHub path from 1Password" -ForegroundColor Red
-    Write-Host "  Error: $_" -ForegroundColor Red
-    exit 1
-}
-
-# For build-time packaging: download the release assets (EXEs) and embed them in resources\embedded
-Write-Host "`n[1d/5] Retrieving GUI GitHub PAT from 1Password..." -ForegroundColor Yellow
-try {
-    $GuiGithubPAT = op read $OP_GUI_GITHUB_TOKEN_REF
-    if ([string]::IsNullOrWhiteSpace($GuiGithubPAT)) { throw "GUI GitHub PAT is empty" }
-    Write-Host "  [OK] GUI GitHub PAT retrieved for build (hidden)" -ForegroundColor Green
-} catch {
-    Write-Host "  [FAIL] Failed to retrieve GUI GitHub PAT from 1Password" -ForegroundColor Red
-    Write-Host "  Error: $_" -ForegroundColor Red
-    exit 1
-}
-
-Write-Host "`n[1e/5] Retrieving PoC GitHub PAT from 1Password..." -ForegroundColor Yellow
-try {
-    $PocGithubPAT = op read $OP_POC_GITHUB_TOKEN_REF
-    if ([string]::IsNullOrWhiteSpace($PocGithubPAT)) { throw "PoC GitHub PAT is empty" }
-    Write-Host "  [OK] PoC GitHub PAT retrieved for build (hidden)" -ForegroundColor Green
-} catch {
-    Write-Host "  [FAIL] Failed to retrieve PoC GitHub PAT from 1Password" -ForegroundColor Red
     Write-Host "  Error: $_" -ForegroundColor Red
     exit 1
 }
@@ -192,8 +166,8 @@ Write-Host "`n[2/5] Creating build_config.json..." -ForegroundColor Yellow
 $BuildConfig = @{ 
     external_api = @{ base_url = $EXTERNAL_API_BASE_URL; bearer_token = $BearerToken; timeout = 10.0 }; 
     github = @{
-        gui = @{ path = $GuiGithubPath; token = $GuiGithubPAT };
-        poc = @{ path = $PocGithubPath; token = $PocGithubPAT }
+        gui = @{ path = $GuiGithubPath };
+        poc = @{ path = $PocGithubPath }
     };
     encryption = @{
         honeygain = @{ salt = $EncHoneygainSalt; password = $EncHoneygainPassword };
@@ -268,6 +242,45 @@ Write-Host "`n[5b/5] Building installer with PyInstaller..." -ForegroundColor Ye
 Write-Host "  This may take 30-60 seconds..." -ForegroundColor Gray
 $ExeName = "frynetworks_installer_v$Version"
 
+# Generate version_info.txt for Windows file properties (right-click > Properties > Details)
+$VerParts = $Version.Split('.')
+$Major = if ($VerParts.Length -ge 1) { $VerParts[0] } else { "0" }
+$Minor = if ($VerParts.Length -ge 2) { $VerParts[1] } else { "0" }
+$Patch = if ($VerParts.Length -ge 3) { $VerParts[2] } else { "0" }
+$VersionInfoContent = @"
+# UTF-8
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=($Major, $Minor, $Patch, 0),
+    prodvers=($Major, $Minor, $Patch, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+    ),
+  kids=[
+    StringFileInfo(
+      [
+      StringTable(
+        u'040904B0',
+        [StringStruct(u'CompanyName', u'FryNetworks'),
+        StringStruct(u'FileDescription', u'FryNetworks Hardware Installer'),
+        StringStruct(u'FileVersion', u'$Version.0'),
+        StringStruct(u'InternalName', u'frynetworks_installer'),
+        StringStruct(u'LegalCopyright', u'Copyright (c) FryNetworks'),
+        StringStruct(u'OriginalFilename', u'frynetworks_installer.exe'),
+        StringStruct(u'ProductName', u'FryNetworks Installer'),
+        StringStruct(u'ProductVersion', u'$Version.0')])
+      ]),
+    VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
+  ]
+)
+"@
+[System.IO.File]::WriteAllText("$PWD\version_info.txt", $VersionInfoContent, (New-Object System.Text.UTF8Encoding $false))
+Write-Host "  [OK] Generated version_info.txt for v$Version" -ForegroundColor Green
+
 # Note: Alternative build method using spec file (recommended to prevent duplicate tray icons):
 # py -m PyInstaller frynetworks_installer.spec
 # This method uses the spec file which includes Windows-specific settings
@@ -316,6 +329,10 @@ try {
     if (Test-Path "build_config.json") {
         Remove-Item "build_config.json" -Force
         Write-Host "`n  Cleaned up build_config.json" -ForegroundColor Gray
+    }
+    if (Test-Path "version_info.txt") {
+        Remove-Item "version_info.txt" -Force
+        Write-Host "  Cleaned up version_info.txt" -ForegroundColor Gray
     }
     # Clean up embedded NSSM (it's now in the exe)
     if (Test-Path "resources\embedded\nssm.exe") {
