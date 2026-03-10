@@ -275,7 +275,8 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
                                     self._debug_log(f"API CONFIG LOADED: Using custom API endpoint: {value}")
                                     return
             
-            self._debug_log(f"[_load_api_config] .env file not found in any candidate directory")
+            # No .env file found — this is normal for production installs.
+            # .env is only used to override API URL or enable test versions.
         except Exception as exc:
             # If we can't read the .env file, silently continue with defaults
             self._debug_log(f"[_load_api_config] Error: {exc}")

@@ -298,7 +298,9 @@ try {
         --hidden-import "core.conflict_detector" `
         --hidden-import "core.naming" `
         --hidden-import "core.key_parser" `
+        --hidden-import "tools.external_api" `
         --collect-submodules "core" `
+        --collect-submodules "tools" `
         --icon "resources\frynetworks_logo.ico" `
         --version-file "version_info.txt" `
         --add-data "build_config.json;." `
@@ -307,6 +309,7 @@ try {
         --add-data "resources\embedded;resources\embedded" `
         --add-data "SDK;SDK" `
         --add-data "core;core" `
+        --add-data "tools;tools" `
         --name $ExeName `
         installer_main.py
     

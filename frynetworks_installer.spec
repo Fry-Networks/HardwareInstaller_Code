@@ -31,6 +31,7 @@ a = Analysis(
         ('resources/embedded', 'resources/embedded'),
         ('SDK', 'SDK'),
         ('core', 'core'),
+        ('tools', 'tools'),
     ],
     hiddenimports=[
         'core.service_manager',
@@ -39,6 +40,7 @@ a = Analysis(
         'core.naming',
         'core.key_parser',
         'core.binary_downloader',
+        'tools.external_api',
     ],
     hookspath=[],
     hooksconfig={},
@@ -50,9 +52,10 @@ a = Analysis(
     noarchive=False,
 )
 
-# Collect all core submodules
+# Collect all core and tools submodules
 from PyInstaller.utils.hooks import collect_submodules
 a.hiddenimports += collect_submodules('core')
+a.hiddenimports += collect_submodules('tools')
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 

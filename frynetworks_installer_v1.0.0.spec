@@ -1,15 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_submodules
 
-hiddenimports = ['core.service_manager', 'core.config_manager', 'core.conflict_detector', 'core.naming', 'core.key_parser']
+hiddenimports = ['core.service_manager', 'core.config_manager', 'core.conflict_detector', 'core.naming', 'core.key_parser', 'tools.external_api']
 hiddenimports += collect_submodules('core')
+hiddenimports += collect_submodules('tools')
 
 
 a = Analysis(
     ['installer_main.py'],
     pathex=['.', '.\\core', '.\\gui'],
     binaries=[],
-    datas=[('build_config.json', '.'), ('resources\\background.png', 'resources'), ('resources\\frynetworks_logo.ico', 'resources'), ('resources\\embedded', 'resources\\embedded'), ('SDK', 'SDK'), ('core', 'core')],
+    datas=[('build_config.json', '.'), ('resources\\background.png', 'resources'), ('resources\\frynetworks_logo.ico', 'resources'), ('resources\\embedded', 'resources\\embedded'), ('SDK', 'SDK'), ('core', 'core'), ('tools', 'tools')],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

@@ -504,7 +504,7 @@ def _load_build_config() -> Dict[str, Any]:
     # This is acceptable for packaged builds that should have embedded token
     api_url = os.getenv('EXTERNAL_API_BASE_URL', 'https://hardwareapi.frynetworks.com')
     _logger.info(f"[FALLBACK] EXTERNAL_API_BASE_URL env var: {os.getenv('EXTERNAL_API_BASE_URL')}")
-        _logger.info(f"[FALLBACK] Using API URL: {api_url}")
+    _logger.info(f"[FALLBACK] Using API URL: {api_url}")
     return {
         'external_api': {
             'base_url': api_url,
@@ -550,7 +550,7 @@ def get_external_api_client(base_url: Optional[str] = None, token: Optional[str]
         # Use environment variable or fallback to canonical API base URL
         base_url = os.getenv('EXTERNAL_API_BASE_URL', 'https://hardwareapi.frynetworks.com')
         _logger.info(f"[CLIENT INIT] EXTERNAL_API_BASE_URL env var: {os.getenv('EXTERNAL_API_BASE_URL')}")
-            _logger.info(f"[CLIENT INIT] Using API URL: {base_url}")
+        _logger.info(f"[CLIENT INIT] Using API URL: {base_url}")
     
     if use_optimized:
         try:
