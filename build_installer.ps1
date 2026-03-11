@@ -78,6 +78,17 @@ try {
     exit 1
 }
 
+Write-Host "`n[1d/5] Retrieving HW Installer GitHub repo path from 1Password..." -ForegroundColor Yellow
+try {
+    $HwGithubPath = op read $OP_HW_GITHUB_REPO_REF
+    if ([string]::IsNullOrWhiteSpace($HwGithubPath)) { throw "HW GitHub path is empty" }
+    Write-Host "  [OK] HW GitHub path retrieved: $HwGithubPath" -ForegroundColor Green
+} catch {
+    Write-Host "  [FAIL] Failed to retrieve HW GitHub path from 1Password" -ForegroundColor Red
+    Write-Host "  Error: $_" -ForegroundColor Red
+    exit 1
+}
+
 $HoneygainKey = $null
 
 # Honeygain API key: required to be provided via 1Password for builds
@@ -167,7 +178,8 @@ $BuildConfig = @{
     external_api = @{ base_url = $EXTERNAL_API_BASE_URL; bearer_token = $BearerToken; timeout = 10.0 }; 
     github = @{
         gui = @{ path = $GuiGithubPath };
-        poc = @{ path = $PocGithubPath }
+        poc = @{ path = $PocGithubPath };
+        hw  = @{ path = $HwGithubPath }
     };
     encryption = @{
         honeygain = @{ salt = $EncHoneygainSalt; password = $EncHoneygainPassword };
@@ -227,6 +239,7 @@ try {
         --onefile `
         --noconsole `
         --paths "." `
+        --add-data "build_config.json;." `
         --icon "resources\frynetworks_logo.ico" `
         --name frynetworks_updater `
         tools\updater.py

@@ -17,13 +17,36 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, cast
 
 
-DEFAULT_REPO = "FryDevsTestingLab/HardwareInstaller"
+FALLBACK_REPO = "FryDevsTestingLab/HardwareInstaller"
 DEFAULT_TASK_NAME = "FryNetworksUpdater"
 DEFAULT_EMBEDDED_TOKEN = os.getenv("EMBEDDED_GITHUB_TOKEN", "")
+
+
+def _load_build_config() -> dict:
+    """Load build_config.json from the PyInstaller bundle or script directory."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+    else:
+        base = Path(__file__).resolve().parent.parent
+    cfg_path = base / "build_config.json"
+    if cfg_path.exists():
+        try:
+            return json.loads(cfg_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _default_repo() -> str:
+    """Read the HW installer GitHub repo from embedded build config."""
+    cfg = _load_build_config()
+    repo = cfg.get("github", {}).get("hw", {}).get("path", "")
+    return repo if repo else FALLBACK_REPO
 
 
 def log_path(custom: Optional[Path] = None) -> Path:
@@ -35,7 +58,11 @@ def log_path(custom: Optional[Path] = None) -> Path:
 
 def write_log(msg: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text((dest.read_text() if dest.exists() else "") + msg + "\n", encoding="utf-8")
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    dest.write_text(
+        (dest.read_text(encoding="utf-8") if dest.exists() else "") + f"[{timestamp}] {msg}\n",
+        encoding="utf-8",
+    )
 
 
 def normalize_version(ver: str) -> str:
@@ -104,7 +131,7 @@ def run_msiexec(msi_path: Path, quiet: bool, log_file: Path) -> None:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Update FryNetworks Installer from latest GitHub release.")
-    p.add_argument("--repo", default=DEFAULT_REPO, help="GitHub repo owner/name (default: %(default)s)")
+    p.add_argument("--repo", default=None, help="GitHub repo owner/name (default: from build config)")
     p.add_argument("--current-version", help="Current version (e.g., v3.6.0). If omitted, infer from installer exe name in the updater directory.")
     p.add_argument("--token", help="GitHub token for higher rate limits/private repos (optional).")
     p.add_argument("--quiet", action="store_true", help="Install MSI silently (/qn).")
@@ -117,6 +144,9 @@ def main() -> int:
     args = parse_args()
     log_file = log_path(args.log)
 
+    repo = args.repo or _default_repo()
+    write_log(f"Using repo: {repo}", log_file)
+
     try:
         current_version = normalize_version(args.current_version) if args.current_version else None
         if not current_version:
@@ -125,7 +155,7 @@ def main() -> int:
 
         token = args.token or os.environ.get("GITHUB_TOKEN") or DEFAULT_EMBEDDED_TOKEN or None
 
-        release = fetch_json(f"https://api.github.com/repos/{args.repo}/releases/latest", token)
+        release = fetch_json(f"https://api.github.com/repos/{repo}/releases/latest", token)
         remote_ver = normalize_version(release.get("tag_name", ""))
         write_log(f"Latest release: {remote_ver}", log_file)
 

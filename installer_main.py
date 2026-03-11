@@ -488,6 +488,18 @@ def acquire_miner_lease(api_client: ExternalApiClient, miner_key: str, install_i
         lease_result = api_client.acquire_installation_lease(miner_key, install_id, lease_seconds=3600, external_ip=external_ip)
         lease_granted = lease_result.get("granted", False) if isinstance(lease_result, dict) else bool(lease_result)
         error_code = lease_result.get("error_code") if isinstance(lease_result, dict) else None
+        acquire_holder = lease_result.get("holder_install_id") if isinstance(lease_result, dict) else None
+
+        # Cross-check: even if granted=True, reject if the API says a different device holds the lease
+        if lease_granted and acquire_holder and acquire_holder != install_id:
+            print(f"⚠ Lease response says granted but holder is {acquire_holder}, not us ({install_id})")
+            return {
+                "success": False,
+                "error": "holder_mismatch",
+                "message": f"Miner key lease is held by another device (Install ID: {acquire_holder})",
+                "resolution": "Stop the miner on the other device before installing here",
+                "holder_install_id": acquire_holder
+            }
 
         if lease_granted:
             print(f"✅ Lease acquired successfully")

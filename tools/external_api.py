@@ -262,6 +262,7 @@ class ExternalApiClient:
                 - granted (bool): True if lease was granted
                 - error_code (str|None): Error code if lease denied (e.g., "IP_ALREADY_REGISTERED")
                 - expires_at (str|None): ISO timestamp when lease expires
+                - holder_install_id (str|None): Install ID of the current lease holder
         """
         body = {"mode": "acquire", "lease_seconds": int(lease_seconds)}
         if external_ip:
@@ -276,9 +277,10 @@ class ExternalApiClient:
             return {
                 "granted": bool(data.get("granted")),
                 "error_code": data.get("error_code"),
-                "expires_at": data.get("expires_at")
+                "expires_at": data.get("expires_at"),
+                "holder_install_id": data.get("holder_install_id"),
             }
-        return {"granted": False, "error_code": None, "expires_at": None}
+        return {"granted": False, "error_code": None, "expires_at": None, "holder_install_id": None}
 
     def renew_installation_lease(self, miner_key: str, install_id: str, lease_seconds: int, external_ip: Optional[str] = None) -> bool:
         """PATCH {base}/installations/{miner_key}/leases/{install_id} -> {"granted": bool}

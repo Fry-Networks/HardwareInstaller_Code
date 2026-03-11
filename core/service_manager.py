@@ -1442,6 +1442,12 @@ class WindowsServiceManager:
                                 lease_result = client.acquire_installation_lease(miner_key, install_id, lease_seconds, external_ip)
                                 acquired = lease_result.get('granted', False) if isinstance(lease_result, dict) else bool(lease_result)
                                 error_code = lease_result.get('error_code') if isinstance(lease_result, dict) else None
+                                acquire_holder = lease_result.get('holder_install_id') if isinstance(lease_result, dict) else None
+
+                                # Cross-check: reject if granted but holder doesn't match us
+                                if acquired and acquire_holder and acquire_holder != install_id:
+                                    acquired = False
+                                    error_code = 'HOLDER_MISMATCH'
 
                                 lease_attempts.append({'mode': 'acquire', 'granted': bool(acquired), 'error_code': error_code})
                                 if acquired:
@@ -1451,6 +1457,8 @@ class WindowsServiceManager:
                                     granted = False
                                     if error_code == "IP_LIMIT_REACHED":
                                         result.setdefault('api_warnings', []).append('Installation blocked: IP limit reached for $($this.miner_code) on your network.')
+                                    elif error_code == 'HOLDER_MISMATCH':
+                                        result.setdefault('api_warnings', []).append(f'Lease holder mismatch: lease is held by {acquire_holder}, not this installation.')
                                     else:
                                         result.setdefault('api_warnings', []).append('Lease renewal failed; acquisition attempt was denied.')
                             except Exception as e:
@@ -1461,12 +1469,22 @@ class WindowsServiceManager:
                             lease_result = client.acquire_installation_lease(miner_key, install_id, lease_seconds, external_ip)
                             acquired = lease_result.get('granted', False) if isinstance(lease_result, dict) else bool(lease_result)
                             error_code = lease_result.get('error_code') if isinstance(lease_result, dict) else None
+                            acquire_holder = lease_result.get('holder_install_id') if isinstance(lease_result, dict) else None
+
+                            # Cross-check: reject if granted but holder doesn't match us
+                            if acquired and acquire_holder and acquire_holder != install_id:
+                                acquired = False
+                                error_code = 'HOLDER_MISMATCH'
 
                             granted = acquired
                             lease_attempts.append({'mode': 'acquire', 'granted': bool(granted), 'error_code': error_code})
 
                             if not granted and error_code == "IP_LIMIT_REACHED":
                                 result['message'] = "Installation blocked: IP limit reached for $($this.miner_code) on your network. Only one Bandwidth Miner is allowed per external IP address."
+                                result['success'] = False
+                                return result
+                            if not granted and error_code == 'HOLDER_MISMATCH':
+                                result['message'] = f"Lease holder mismatch: lease is held by {acquire_holder}, not this installation."
                                 result['success'] = False
                                 return result
                             lease_attempts.append({'mode': 'acquire', 'granted': bool(granted)})
@@ -3223,6 +3241,12 @@ class LinuxServiceManager:
                                 lease_result = client.acquire_installation_lease(miner_key, install_id, lease_seconds, external_ip)
                                 acquired = lease_result.get('granted', False) if isinstance(lease_result, dict) else bool(lease_result)
                                 error_code = lease_result.get('error_code') if isinstance(lease_result, dict) else None
+                                acquire_holder = lease_result.get('holder_install_id') if isinstance(lease_result, dict) else None
+
+                                # Cross-check: reject if granted but holder doesn't match us
+                                if acquired and acquire_holder and acquire_holder != install_id:
+                                    acquired = False
+                                    error_code = 'HOLDER_MISMATCH'
 
                                 lease_attempts.append({'mode': 'acquire', 'granted': bool(acquired), 'error_code': error_code})
                                 if acquired:
@@ -3232,6 +3256,8 @@ class LinuxServiceManager:
                                     granted = False
                                     if error_code == "IP_LIMIT_REACHED":
                                         result.setdefault('api_warnings', []).append('Installation blocked: IP limit reached for $($this.miner_code) on your network.')
+                                    elif error_code == 'HOLDER_MISMATCH':
+                                        result.setdefault('api_warnings', []).append(f'Lease holder mismatch: lease is held by {acquire_holder}, not this installation.')
                                     else:
                                         result.setdefault('api_warnings', []).append('Lease renewal failed; acquisition attempt was denied.')
                             except Exception as e:
@@ -3242,12 +3268,22 @@ class LinuxServiceManager:
                             lease_result = client.acquire_installation_lease(miner_key, install_id, lease_seconds, external_ip)
                             acquired = lease_result.get('granted', False) if isinstance(lease_result, dict) else bool(lease_result)
                             error_code = lease_result.get('error_code') if isinstance(lease_result, dict) else None
+                            acquire_holder = lease_result.get('holder_install_id') if isinstance(lease_result, dict) else None
+
+                            # Cross-check: reject if granted but holder doesn't match us
+                            if acquired and acquire_holder and acquire_holder != install_id:
+                                acquired = False
+                                error_code = 'HOLDER_MISMATCH'
 
                             granted = acquired
                             lease_attempts.append({'mode': 'acquire', 'granted': bool(granted), 'error_code': error_code})
 
                             if not granted and error_code == "IP_LIMIT_REACHED":
                                 result['message'] = "Installation blocked: IP limit reached for $($this.miner_code) on your network. Only one Bandwidth Miner is allowed per external IP address."
+                                result['success'] = False
+                                return result
+                            if not granted and error_code == 'HOLDER_MISMATCH':
+                                result['message'] = f"Lease holder mismatch: lease is held by {acquire_holder}, not this installation."
                                 result['success'] = False
                                 return result
                             lease_attempts.append({'mode': 'acquire', 'granted': bool(granted)})

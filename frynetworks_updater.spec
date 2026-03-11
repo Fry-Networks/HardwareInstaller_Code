@@ -5,7 +5,7 @@ a = Analysis(
     ['tools\\updater.py'],
     pathex=['.'],
     binaries=[],
-    datas=[],
+    datas=[('build_config.json', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
