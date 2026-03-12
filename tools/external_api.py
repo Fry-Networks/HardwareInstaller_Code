@@ -365,7 +365,8 @@ class ExternalApiClient:
         status = self.lease_status(miner_key)
         if not isinstance(status, dict):
             return False
-        if not status.get("active"):
+        # API returns "granted" (not "active")
+        if not status.get("granted"):
             return False
         holder = status.get("holder_install_id")
         if not isinstance(holder, str) or not holder.strip():

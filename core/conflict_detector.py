@@ -59,11 +59,32 @@ class ConflictDetector:
         self.api_client = api_client
         self.use_test = use_test
     
-    def _get_install_id(self) -> str:
-        """Get or create install_id for this installation."""
-        # REMOVED: Reading/writing plaintext install_id.txt
-        # Only encrypted files are used for security
+    def _get_install_id(self, miner_code: str = "") -> str:
+        """Read install_id from the encrypted install_config on disk.
+
+        Falls back to a random UUID when no config exists yet (first install).
+        """
         import uuid
+        if not miner_code:
+            return str(uuid.uuid4())
+
+        try:
+            from resources.embedded.create_install_config import read_install_config
+
+            if self.platform.startswith("win"):
+                programdata = os.environ.get("PROGRAMDATA", r"C:\ProgramData")
+                config_path = Path(programdata) / "FryNetworks" / f"miner-{miner_code}" / "config" / "install_config.enc"
+            else:
+                config_path = Path("/var/lib/frynetworks") / f"miner-{miner_code}" / "config" / "install_config.enc"
+
+            if config_path.exists():
+                cfg = read_install_config(str(config_path))
+                iid = cfg.get("install_id")
+                if iid:
+                    return iid
+        except Exception as exc:
+            _cd_logger.warning(f"Failed to read install_id from install_config.enc: {exc}")
+
         return str(uuid.uuid4())
     
     def check_device_conflicts(self, new_key: str) -> Dict[str, Any]:
@@ -235,7 +256,7 @@ class ConflictDetector:
                     })
             
             # Global instance check via External API
-            install_id = self._get_install_id()
+            install_id = self._get_install_id(new_miner.get("code", ""))
             has_other_active = self.api_client.has_other_active_installation(new_key, install_id)
             if has_other_active:
                 conflicts["active_instance"] = True
