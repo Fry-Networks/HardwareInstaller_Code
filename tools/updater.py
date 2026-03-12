@@ -72,9 +72,9 @@ def normalize_version(ver: str) -> str:
 
 def read_version_from_installer(dir_path: Path) -> Optional[str]:
     """
-    Look for frynetworks_installer_v*.exe next to the updater and parse the version.
+    Look for FryNetworks_Installer_v*.exe next to the updater and parse the version.
     """
-    pattern = "frynetworks_installer_v*.exe"
+    pattern = "FryNetworks_Installer_v*.exe"
     for candidate in dir_path.glob(pattern):
         name = candidate.name
         # expect frynetworks_installer_vX.Y.Z.exe

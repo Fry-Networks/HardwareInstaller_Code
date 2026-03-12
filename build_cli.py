@@ -135,7 +135,7 @@ def _guess_installer_exe(dist_dir: Path) -> Optional[Path]:
     if not dist_dir.exists():
         return None
     candidates: List[Path] = []
-    for pattern in ("frynetworks_installer*.exe", "*installer*.exe"):
+    for pattern in ("FryNetworks_Installer*.exe", "frynetworks_installer*.exe", "*installer*.exe"):
         candidates.extend(dist_dir.glob(pattern))
     if not candidates:
         return None
@@ -176,7 +176,7 @@ def build_msi(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     wixobj = output_dir / "installer.wixobj"
-    msi_out = output_dir / f"fry_installer_{version}.msi"
+    msi_out = output_dir / f"FryNetworks_Installer_v{version}.msi"
 
     candle_exe = shutil.which("candle") or str(Path("C:/Program Files (x86)/WiX Toolset v3.14/bin/candle.exe"))
     light_exe = shutil.which("light") or str(Path("C:/Program Files (x86)/WiX Toolset v3.14/bin/light.exe"))

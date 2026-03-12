@@ -253,7 +253,7 @@ try {
 
 Write-Host "`n[5b/5] Building installer with PyInstaller..." -ForegroundColor Yellow
 Write-Host "  This may take 30-60 seconds..." -ForegroundColor Gray
-$ExeName = "frynetworks_installer_v$Version"
+$ExeName = "FryNetworks_Installer_v$Version"
 
 # Generate version_info.txt for Windows file properties (right-click > Properties > Details)
 $VerParts = $Version.Split('.')
