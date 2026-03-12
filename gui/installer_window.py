@@ -5165,7 +5165,13 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
         import os
         import tempfile
         import subprocess
+        import ssl
         import urllib.request
+        try:
+            import certifi
+            _ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+        except ImportError:
+            _ssl_ctx = ssl.create_default_context()
         from pathlib import Path
 
         def _status(msg: str) -> None:
@@ -5225,8 +5231,10 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
         installer_path = os.path.join(temp_dir, 'Olostep-Browser-Setup.exe')
         
         try:
-            # Download with progress feedback
-            urllib.request.urlretrieve(olostep_url, installer_path)
+            # Download with SSL context to avoid certificate errors on some machines
+            req = urllib.request.Request(olostep_url)
+            with urllib.request.urlopen(req, context=_ssl_ctx) as resp, open(installer_path, "wb") as out:
+                out.write(resp.read())
             _status("Installing Olostep Browser...")
             
             # Run installer silently
