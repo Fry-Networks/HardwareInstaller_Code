@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import ssl
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -23,6 +24,15 @@ from typing import Optional, cast
 
 
 FALLBACK_REPO = "FryDevsTestingLab/HardwareInstaller"
+
+# Build a shared SSL context using certifi's CA bundle when available.
+# PyInstaller bundles on some Windows machines lack system root certificates,
+# causing "CERTIFICATE_VERIFY_FAILED" errors with plain urlopen().
+try:
+    import certifi
+    _ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    _ssl_ctx = ssl.create_default_context()
 DEFAULT_TASK_NAME = "FryNetworksUpdater"
 DEFAULT_EMBEDDED_TOKEN = os.getenv("EMBEDDED_GITHUB_TOKEN", "")
 
@@ -88,7 +98,7 @@ def fetch_json(url: str, token: Optional[str] = None) -> dict:
     req = urllib.request.Request(url)
     if token:
         req.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req, context=_ssl_ctx) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -97,7 +107,7 @@ def download(url: str, dest: Path, token: Optional[str] = None) -> None:
     if token:
         req.add_header("Authorization", f"Bearer {token}")
         req.add_header("Accept", "application/octet-stream")
-    with urllib.request.urlopen(req) as resp, open(dest, "wb") as f:
+    with urllib.request.urlopen(req, context=_ssl_ctx) as resp, open(dest, "wb") as f:
         while True:
             chunk = resp.read(1024 * 1024)
             if not chunk:
