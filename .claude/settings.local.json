@@ -3,7 +3,8 @@
     "allow": [
       "Bash(op read \"op://HardwareAPI/Hardware_API/API_BEARER_TOKEN\")",
       "Bash(curl -s -H \"Authorization: Bearer hwapi_9k2m8n4p6q7r3s5t8v1w2x4y6z7a9b3c5d8e1f4g7h2j5k\" \"https://hardwareapi.frynetworks.com/versions/AEM?platform=test-windows\")",
-      "Bash(curl -s -H \"Authorization: Bearer hwapi_9k2m8n4p6q7r3s5t8v1w2x4y6z7a9b3c5d8e1f4g7h2j5k\" \"https://hardwareapi.frynetworks.com/versions/AEM\")"
+      "Bash(curl -s -H \"Authorization: Bearer hwapi_9k2m8n4p6q7r3s5t8v1w2x4y6z7a9b3c5d8e1f4g7h2j5k\" \"https://hardwareapi.frynetworks.com/versions/AEM\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\(''core/conflict_detector.py'', doraise=True\\); py_compile.compile\\(''tools/external_api.py'', doraise=True\\); print\\(''OK''\\)\")"
     ]
   }
 }
