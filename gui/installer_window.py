@@ -15,6 +15,7 @@ import html
 import time
 import threading
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, cast, Optional, List, Set, Callable
 
@@ -36,8 +37,49 @@ from tools.theme import Theme
 from tools.banner import TopBanner
 
 # Import external API client from tools package
-from tools.external_api import get_external_api_client, _BUILD_CONFIG
+from tools.external_api import get_external_api_client, ExternalApiClient, _BUILD_CONFIG
 from version import __version__ as version_str
+
+
+class _WelcomeDataWorker(QtCore.QThread):
+    """Fetches installer availability data from the API in a background thread."""
+    finished = QtCore.Signal(object)
+
+    def __init__(self, api_base_url: str, api_token, use_test: bool, parent=None):
+        super().__init__(parent)
+        self._api_base_url = api_base_url
+        self._api_token = api_token
+        self._use_test = use_test
+
+    def run(self):
+        slog = logging.getLogger("startup")
+        slog.info("_WelcomeDataWorker: thread started")
+        t0 = time.monotonic()
+        result = {
+            'supported_windows': {}, 'supported_linux': {},
+            'test_windows_set': set(), 'test_linux_set': set(),
+        }
+        try:
+            client = ExternalApiClient(self._api_base_url, token=self._api_token, timeout=5.0)
+            client._RETRY_DELAYS = []
+
+            slog.info("_WelcomeDataWorker: fetching windows installers")
+            result['supported_windows'] = client.get_supported_installers('windows', use_test=False) or {}
+            slog.info("_WelcomeDataWorker: fetching linux installers")
+            result['supported_linux'] = client.get_supported_installers('linux', use_test=False) or {}
+
+            if self._use_test:
+                slog.info("_WelcomeDataWorker: fetching test installers")
+                tw = client.get_supported_installers('windows', use_test=True) or {}
+                tl = client.get_supported_installers('linux', use_test=True) or {}
+                result['test_windows_set'] = set(str(x).upper() for x in tw.get('miner_codes', []) if x)
+                result['test_linux_set'] = set(str(x).upper() for x in tl.get('miner_codes', []) if x)
+
+            slog.info(f"_WelcomeDataWorker: completed in {time.monotonic() - t0:.3f}s")
+            self.finished.emit(result)
+        except Exception as e:
+            slog.warning(f"_WelcomeDataWorker: failed after {time.monotonic() - t0:.3f}s — {e}")
+            self.finished.emit(None)
 
 
 class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
@@ -54,6 +96,8 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
     
     def __init__(self):
         super().__init__()
+        self._slog = logging.getLogger("startup")
+        self._slog.info("FryNetworksInstallerWindow.__init__() started")
 
         # ---- Concise logging mode (ON by default) ----
         # When True, the UI log shows ONLY a short, structured sequence of steps
@@ -154,10 +198,15 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
             self._app_icon = QtGui.QIcon()
 
         self.setup_ui()
+        self._slog.info("setup_ui() completed (tray icon now visible)")
         self._welcome_shown = False
         self._welcome_closed_by_user = False  # Track if user clicked "Get Started"
+        self._welcome_worker = None
+        self._welcome_data_loaded = False
+        self._welcome_table_label = None
         self.apply_theme()
-        self._maybe_show_welcome()
+        QtCore.QTimer.singleShot(0, self._maybe_show_welcome)
+        self._slog.info("_maybe_show_welcome() deferred via QTimer.singleShot(0)")
 
         # Connect invocation signals to main-thread slots (queued)
         try:
@@ -173,6 +222,7 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
         except Exception:
             # Best-effort; UI may still work without explicit connections in unusual environments
             pass
+        self._slog.info("Signal connections completed")
 
         # Debug log file already initialized at the start of __init__
 
@@ -201,7 +251,8 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
         self.setWindowTitle(window_title)
         self.setMinimumSize(800, 700)
         self.resize(900, 800)
-        
+        self._slog.info("FryNetworksInstallerWindow.__init__() finished")
+
     def _debug_log(self, message: str) -> None:
         """Best-effort append-only debug logger for installer events."""
         try:
@@ -275,8 +326,7 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
                                     self._debug_log(f"API CONFIG LOADED: Using custom API endpoint: {value}")
                                     return
             
-            # No .env file found — this is normal for production installs.
-            # .env is only used to override API URL or enable test versions.
+            self._debug_log(f"[_load_api_config] .env file not found in any candidate directory")
         except Exception as exc:
             # If we can't read the .env file, silently continue with defaults
             self._debug_log(f"[_load_api_config] Error: {exc}")
@@ -648,56 +698,19 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
             pass
         return "auto"
     def _maybe_show_welcome(self) -> None:
-        """Show welcome screen with miner availability based on test mode."""
+        """Show welcome screen immediately with a loading placeholder, then
+        fetch miner availability data from the API in a background thread."""
         try:
+            self._slog.info("_maybe_show_welcome() executing")
             if getattr(self, '_welcome_shown', False):
+                self._slog.info("Welcome already shown, skipping")
                 return
 
-            use_test = getattr(self, '_use_test_versions', False)
-            
-            # Fetch supported miners from API
-            supported_windows = {}
-            supported_linux = {}
-            test_windows_set = set()
-            test_linux_set = set()
-
-            if hasattr(self, 'api_client'):
-                try:
-                    # Get production versions - returns dict with miners/miner_codes/supported_devices
-                    win_data = self.api_client.get_supported_installers('windows', use_test=False) or {}
-                    lin_data = self.api_client.get_supported_installers('linux', use_test=False) or {}
-                    supported_windows = win_data
-                    supported_linux = lin_data
-                except Exception:
-                    pass
-                
-                # If test mode, also get test versions
-                if use_test:
-                    try:
-                        test_win_data = self.api_client.get_supported_installers('windows', use_test=True) or {}
-                        test_lin_data = self.api_client.get_supported_installers('linux', use_test=True) or {}
-                        # Extract miner codes from the response
-                        test_windows_set = set(str(x).upper() for x in test_win_data.get('miner_codes', []) if x)
-                        test_linux_set = set(str(x).upper() for x in test_lin_data.get('miner_codes', []) if x)
-                    except Exception:
-                        pass
-
-            miners = sorted({info['name'] for info in self.parser.MINER_TYPES.values()})
-            welcome_html = self.generate_welcome_message(
-                miners,
-                supported_windows=supported_windows,
-                supported_linux=supported_linux,
-                test_windows_codes=test_windows_set,
-                test_linux_codes=test_linux_set,
-            )
-
-            # Build a small welcome widget for the central area
             welcome_widget = QtWidgets.QWidget()
             main_layout = QtWidgets.QVBoxLayout(welcome_widget)
             main_layout.setContentsMargins(0, 0, 0, 0)
             main_layout.setSpacing(0)
 
-            # Top banner (use background image when available)
             try:
                 if getattr(sys, 'frozen', False):
                     base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
@@ -714,7 +727,6 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
             except Exception:
                 pass
 
-            # Intro label (restore original welcome intro)
             try:
                 intro_label = QtWidgets.QLabel(
                     "<div style='font-size:20px; font-weight:bold; color:#ffffff;'>Welcome</div>"
@@ -724,46 +736,37 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
                 )
                 intro_label.setTextFormat(QtCore.Qt.TextFormat.RichText)
                 intro_label.setWordWrap(True)
-                # Create a left-margined container for intro + legend + table so they align
                 try:
                     table_container = QtWidgets.QWidget()
                     tc_layout = QtWidgets.QVBoxLayout(table_container)
-                    # Add a left margin to shift content right (e.g., 48px)
                     tc_layout.setContentsMargins(48, 8, 0, 0)
                     tc_layout.setSpacing(6)
-
-                    # Add intro into the same container so it inherits the left margin
                     tc_layout.addWidget(intro_label)
 
-                    # Legend removed per UI preference (keeps content minimal)
-
-                    # Table / welcome HTML (added into container below)
-                    table_label = QtWidgets.QLabel(welcome_html)
+                    table_label = QtWidgets.QLabel(
+                        "<div style='margin-top:16px; font-size:14px; color:#aaaaaa;'>"
+                        "Loading available miners...</div>"
+                    )
                     table_label.setTextFormat(QtCore.Qt.TextFormat.RichText)
                     table_label.setWordWrap(True)
                     tc_layout.addWidget(table_label, alignment=QtCore.Qt.AlignmentFlag.AlignHCenter)
-
+                    self._welcome_table_label = table_label
                     main_layout.addWidget(table_container)
                 except Exception:
-                    # Fallback: ensure intro and legend also get a left margin when added directly
                     try:
                         fallback_container = QtWidgets.QWidget()
                         fc_layout = QtWidgets.QVBoxLayout(fallback_container)
                         fc_layout.setContentsMargins(48, 8, 0, 0)
                         fc_layout.addWidget(intro_label)
-                        # Legend removed in fallback as well
-                        lbl = QtWidgets.QLabel(welcome_html)
-                        lbl.setTextFormat(QtCore.Qt.TextFormat.RichText)
+                        lbl = QtWidgets.QLabel("Loading available miners...")
                         lbl.setWordWrap(True)
                         fc_layout.addWidget(lbl)
+                        self._welcome_table_label = lbl
                         main_layout.addWidget(fallback_container)
                     except Exception:
-                        # As a last resort, add intro with no margin (better than crashing)
                         main_layout.addWidget(intro_label)
             except Exception:
                 pass
-
-            # The table HTML is inserted above inside the left-margined container
 
             footer = QtWidgets.QFrame()
             footer_layout = QtWidgets.QHBoxLayout(footer)
@@ -781,10 +784,74 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
             try:
                 self.setCentralWidget(welcome_widget)
                 self._welcome_shown = True
+                self._slog.info("Welcome screen set as central widget (loading state)")
             except Exception:
-                # If we can't set the central widget (e.g., partial init), silently skip
-                pass
-            # After welcome shown, attempt lightweight sync of version_platform for last install context
+                self._slog.warning("Failed to set welcome screen as central widget")
+
+            self._start_welcome_data_fetch()
+
+        except Exception as e:
+            self._debug_log(f"[_maybe_show_welcome] OUTER EXCEPTION: {e}")
+            self._slog.error(f"_maybe_show_welcome() OUTER EXCEPTION: {e}")
+
+    def _start_welcome_data_fetch(self) -> None:
+        """Launch the background worker to fetch miner availability data."""
+        try:
+            api_base = getattr(self.api_client, 'base_url', None) if hasattr(self, 'api_client') else None
+            api_token = getattr(self.api_client, 'token', None) if hasattr(self, 'api_client') else None
+            if not api_base:
+                self._slog.warning("_start_welcome_data_fetch: no api_client or base_url, skipping")
+                return
+            use_test = getattr(self, '_use_test_versions', False)
+            self._welcome_worker = _WelcomeDataWorker(api_base, api_token, use_test, parent=self)
+            self._welcome_worker.finished.connect(self._on_welcome_data_loaded)
+            self._welcome_worker.start()
+            self._slog.info("_start_welcome_data_fetch: worker thread started")
+        except Exception as e:
+            self._slog.warning(f"_start_welcome_data_fetch: failed to start worker — {e}")
+
+    def _on_welcome_data_loaded(self, results) -> None:
+        """Slot called on the main thread when the API worker finishes."""
+        try:
+            self._slog.info(f"_on_welcome_data_loaded: received results={results is not None}")
+            self._welcome_data_loaded = True
+
+            if getattr(self, '_welcome_closed_by_user', False):
+                self._slog.info("_on_welcome_data_loaded: user already clicked Get Started, ignoring")
+                return
+
+            label = getattr(self, '_welcome_table_label', None)
+            if label is None:
+                return
+
+            if results is None:
+                label.setText(
+                    "<div style='margin-top:16px; font-size:14px; color:#f97316;'>"
+                    "Could not load miner availability. Check your connection and try again.</div>"
+                )
+                try:
+                    retry_btn = QtWidgets.QPushButton("Retry")
+                    retry_btn.setFixedSize(80, 28)
+                    retry_btn.clicked.connect(self._retry_welcome_data)
+                    parent_layout = label.parentWidget().layout() if label.parentWidget() else None
+                    if parent_layout:
+                        parent_layout.addWidget(retry_btn, alignment=QtCore.Qt.AlignmentFlag.AlignHCenter)
+                except Exception:
+                    pass
+                self._slog.info("_on_welcome_data_loaded: showing error with retry button")
+                return
+
+            miners = sorted({info['name'] for info in self.parser.MINER_TYPES.values()})
+            welcome_html = self.generate_welcome_message(
+                miners,
+                supported_windows=results.get('supported_windows'),
+                supported_linux=results.get('supported_linux'),
+                test_windows_codes=results.get('test_windows_set'),
+                test_linux_codes=results.get('test_linux_set'),
+            )
+            label.setText(welcome_html)
+            self._slog.info("_on_welcome_data_loaded: welcome table updated with API data")
+
             try:
                 base_platform = 'windows' if self._is_windows else 'linux'
                 version_platform = f"test-{base_platform}" if getattr(self, '_use_test_versions', False) else base_platform
@@ -807,9 +874,31 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
                         pass
             except Exception:
                 pass
+
         except Exception as e:
-            self._debug_log(f"[_maybe_show_welcome] OUTER EXCEPTION: {e}")
-            pass
+            self._slog.error(f"_on_welcome_data_loaded: EXCEPTION: {e}")
+
+    def _retry_welcome_data(self) -> None:
+        """Retry fetching welcome data after a failure."""
+        try:
+            label = getattr(self, '_welcome_table_label', None)
+            if label:
+                label.setText(
+                    "<div style='margin-top:16px; font-size:14px; color:#aaaaaa;'>"
+                    "Loading available miners...</div>"
+                )
+            if label and label.parentWidget():
+                layout = label.parentWidget().layout()
+                if layout:
+                    for i in range(layout.count() - 1, -1, -1):
+                        item = layout.itemAt(i)
+                        w = item.widget() if item else None
+                        if isinstance(w, QtWidgets.QPushButton) and w.text() == "Retry":
+                            w.deleteLater()
+            self._start_welcome_data_fetch()
+            self._slog.info("_retry_welcome_data: retry started")
+        except Exception as e:
+            self._slog.error(f"_retry_welcome_data: EXCEPTION: {e}")
 
     def generate_welcome_message(
         self,
@@ -3620,20 +3709,23 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
 
     def _setup_tray_icon(self):
         """Initialize system tray icon with context menu."""
-        # Prevent creating multiple tray icons if called more than once
         if self._tray_icon is not None:
+            self._slog.info("_setup_tray_icon(): already created, skipping")
             return
-        
+
         try:
             if not QtWidgets.QSystemTrayIcon.isSystemTrayAvailable():
+                self._slog.warning("_setup_tray_icon(): system tray not available")
                 return
         except Exception:
+            self._slog.warning("_setup_tray_icon(): isSystemTrayAvailable() raised exception")
             return
 
         icon = getattr(self, "_app_icon", None)
         if not icon or icon.isNull():
             icon = self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_ComputerIcon)
 
+        self._slog.info("_setup_tray_icon(): creating QSystemTrayIcon")
         tray = QtWidgets.QSystemTrayIcon(icon, self)
         tray.setToolTip("Fry Installer - Install and update Fry miners and nodes")
 
@@ -3656,6 +3748,7 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
         tray.setContextMenu(menu)
         tray.activated.connect(self._on_tray_activated)
         tray.show()
+        self._slog.info("_setup_tray_icon(): tray.show() called — tray icon now visible")
         self._tray_icon = tray
 
     def _restore_from_tray(self):
@@ -4526,23 +4619,30 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
         # Transition out of post-install mode when starting a fresh install
         self._post_install_mode = False
 
-        # Check for AEM miner and Olostep Browser requirement
+        # Check for AEM miner and companion software requirements
         install_olostep = False
+        install_orbit = False
+        install_web_agent = False
         if self.current_miner_info and self.current_miner_info.get('code') == 'AEM':
             reply = QtWidgets.QMessageBox.question(
                 self,
-                "Olostep Browser Required",
+                "Required Software",
                 "As part of the Olostep partnership with FryNetworks, installing and running "
-                "Olostep Browser is mandatory for AI Edge Miner (AEM) installations.\n\n"
-                "Do you want to continue and install Olostep Browser?",
+                "the following software is mandatory for AI Edge Miner (AEM) installations:\n\n"
+                "  1. Olostep Browser\n"
+                "  2. Orbit Desktop App\n"
+                "  3. Web Agent Browser Extension\n\n"
+                "Do you want to continue and install all required components?",
                 QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
                 QtWidgets.QMessageBox.StandardButton.Yes
             )
-            
+
             if reply != QtWidgets.QMessageBox.StandardButton.Yes:
                 self.status_bar.setText("Installation cancelled")
                 return
             install_olostep = True
+            install_orbit = True
+            install_web_agent = True
 
         # Hide the Installation Summary to give more room for progress
         try:
@@ -4569,7 +4669,9 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
             "create_desktop_shortcut": (self.desktop_shortcut.isChecked() if hasattr(self, 'desktop_shortcut') else False),
             "pin_start_menu": (self.pin_start_checkbox.isChecked() if hasattr(self, 'pin_start_checkbox') else False),
             "auto_start": self.auto_start.isChecked(),
-            "install_olostep": install_olostep
+            "install_olostep": install_olostep,
+            "install_orbit": install_orbit,
+            "install_web_agent": install_web_agent,
         }
         # Bright consent configuration (BM installs)
         # Installer always stages SDK files but doesn't activate (consent=false)
@@ -4838,8 +4940,38 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
                         self.installation_failed("Olostep Browser Installation Failed", [str(e)])
                         return
 
+                # Step 4b - Install Orbit (AEM only)
+                if options.get("install_orbit") and miner_info.get("code") == "AEM":
+                    if self.concise_log:
+                        self.log_progress("4b. Installing Orbit Desktop App (required)...")
+                    try:
+                        self._install_orbit(
+                            progress_cb=_olostep_progress,
+                            log_cb=self.log_progress
+                        )
+                        if self.concise_log:
+                            self.log_progress("4b. Installing Orbit Desktop App (required)... \u2713")
+                    except Exception as e:
+                        self.installation_failed("Orbit Installation Failed", [str(e)])
+                        return
+
+                # Step 4c - Install Web Agent Extension (AEM only)
+                if options.get("install_web_agent") and miner_info.get("code") == "AEM":
+                    if self.concise_log:
+                        self.log_progress("4c. Installing Web Agent Extension (required)...")
+                    try:
+                        self._install_web_agent(
+                            progress_cb=_olostep_progress,
+                            log_cb=self.log_progress
+                        )
+                        if self.concise_log:
+                            self.log_progress("4c. Installing Web Agent Extension (required)... \u2713")
+                    except Exception as e:
+                        self.installation_failed("Web Agent Installation Failed", [str(e)])
+                        return
+
                 # Don't write configuration here - it will be written after installation with version info
-                
+
                 # Step 5 — Dependencies (concise)
                 if self.concise_log:
                     self.log_progress("5. Installing dependencies... ✓")
@@ -5165,13 +5297,7 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
         import os
         import tempfile
         import subprocess
-        import ssl
         import urllib.request
-        try:
-            import certifi
-            _ssl_ctx = ssl.create_default_context(cafile=certifi.where())
-        except ImportError:
-            _ssl_ctx = ssl.create_default_context()
         from pathlib import Path
 
         def _status(msg: str) -> None:
@@ -5231,10 +5357,8 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
         installer_path = os.path.join(temp_dir, 'Olostep-Browser-Setup.exe')
         
         try:
-            # Download with SSL context to avoid certificate errors on some machines
-            req = urllib.request.Request(olostep_url)
-            with urllib.request.urlopen(req, context=_ssl_ctx) as resp, open(installer_path, "wb") as out:
-                out.write(resp.read())
+            # Download with progress feedback
+            urllib.request.urlretrieve(olostep_url, installer_path)
             _status("Installing Olostep Browser...")
             
             # Run installer silently
@@ -5312,7 +5436,558 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
                 return False
         except Exception:
             return False
-    
+
+    # ---- Orbit + Web Agent companion software (AEM only) ----
+
+    def _install_orbit(
+        self,
+        progress_cb: Optional[Callable[[str], None]] = None,
+        log_cb: Optional[Callable[[str], None]] = None
+    ) -> None:
+        """Download and install Orbit desktop app for AEM partnership requirement."""
+        import os, tempfile, subprocess, ssl, urllib.request
+        try:
+            import certifi
+            _ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+        except ImportError:
+            _ssl_ctx = ssl.create_default_context()
+        from pathlib import Path
+
+        def _status(msg):
+            if progress_cb:
+                try: progress_cb(msg); return
+                except Exception: pass
+            try: self.status_bar.setText(msg); QtWidgets.QApplication.processEvents()
+            except Exception: pass
+
+        def _log(msg):
+            if log_cb:
+                try: log_cb(msg); return
+                except Exception: pass
+            _status(msg)
+
+        possible_paths = [
+            Path(os.environ.get('LOCALAPPDATA', '')) / 'Orbit' / 'Orbit.exe',
+            Path(os.environ.get('PROGRAMFILES', 'C:\\Program Files')) / 'Orbit' / 'Orbit.exe',
+            Path(os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)')) / 'Orbit' / 'Orbit.exe',
+            Path.home() / 'AppData' / 'Local' / 'Orbit' / 'Orbit.exe',
+        ]
+        for path in possible_paths:
+            if path.exists():
+                _status("Orbit is already installed")
+                return
+
+        try:
+            if self._is_orbit_running():
+                _status("Orbit is already running")
+                return
+        except Exception:
+            pass
+
+        orbit_url = os.getenv(
+            'ORBIT_SETUP_URL',
+            'https://frynetworks-downloads.b-cdn.net/installers/Orbit-1.2.0%2BSetup.exe'
+        )
+        _status("Downloading Orbit...")
+        temp_dir = tempfile.gettempdir()
+        installer_path = os.path.join(temp_dir, 'Orbit-Setup.exe')
+        try:
+            req = urllib.request.Request(orbit_url)
+            with urllib.request.urlopen(req, context=_ssl_ctx) as resp, open(installer_path, "wb") as out:
+                out.write(resp.read())
+            _status("Installing Orbit...")
+            process = subprocess.run(
+                [installer_path, '--silent'],
+                capture_output=True, timeout=600
+            )
+            if process.returncode != 0:
+                raise RuntimeError(f"Orbit installer exited with code {process.returncode}")
+            _log("Orbit installed successfully")
+        except Exception as e:
+            raise RuntimeError(f"Failed to download or install Orbit: {str(e)}")
+        finally:
+            try:
+                if os.path.exists(installer_path):
+                    os.remove(installer_path)
+            except Exception:
+                pass
+
+    def _is_orbit_running(self) -> bool:
+        """Return True if an Orbit process appears to be running."""
+        import subprocess, sys
+        try:
+            try:
+                import psutil
+                for proc in psutil.process_iter(['name', 'exe', 'cmdline']):
+                    try:
+                        names = []
+                        if proc.info.get('name'): names.append(proc.info.get('name'))
+                        if proc.info.get('exe'): names.append(proc.info.get('exe'))
+                        for n in names:
+                            if n and 'orbit' in str(n).lower():
+                                return True
+                    except Exception:
+                        continue
+                return False
+            except Exception:
+                if sys.platform.startswith('win'):
+                    try:
+                        out = subprocess.check_output(['tasklist', '/FO', 'CSV'], text=True, stderr=subprocess.DEVNULL)
+                        if 'orbit' in out.lower():
+                            return True
+                    except Exception:
+                        pass
+                return False
+        except Exception:
+            return False
+
+    def _install_web_agent(
+        self,
+        progress_cb: Optional[Callable[[str], None]] = None,
+        log_cb: Optional[Callable[[str], None]] = None
+    ) -> None:
+        """Download and install Web Agent extension for all Chromium browsers."""
+        import os, sys, struct, zipfile, tempfile, subprocess, ssl, urllib.request, json
+        try:
+            import certifi
+            _ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+        except ImportError:
+            _ssl_ctx = ssl.create_default_context()
+        from pathlib import Path
+
+        EXTENSION_ID = "boielbimiidkndfedfhjloejnilfbjel"
+        CRX_URL = os.getenv(
+            'WEB_AGENT_CRX_URL',
+            'https://orbit-api.olostep.com/api/extensions/boielbimiidkndfedfhjloejnilfbjel/download'
+        )
+        local_app_data = os.environ.get('LOCALAPPDATA', '')
+        ext_dir = Path(local_app_data) / 'Orbit' / 'extensions' / 'web-agent'
+        ext_dir_str = str(ext_dir).replace("'", "''")
+
+        BROWSER_POLICY_PATHS = [
+            r"SOFTWARE\Policies\Google\Chrome",
+            r"SOFTWARE\Policies\BraveSoftware\Brave-Browser",
+            r"SOFTWARE\Policies\Microsoft\Edge",
+        ]
+
+        def _status(msg):
+            if progress_cb:
+                try: progress_cb(msg); return
+                except Exception: pass
+            try: self.status_bar.setText(msg); QtWidgets.QApplication.processEvents()
+            except Exception: pass
+
+        def _log(msg):
+            if log_cb:
+                try: log_cb(msg); return
+                except Exception: pass
+            _status(msg)
+
+        def _dbg(msg):
+            try: self._debug_log(f"[WebAgent] {msg}")
+            except Exception: pass
+
+        # 4a-pre. Add Defender exclusion BEFORE downloading/extracting
+        if sys.platform.startswith('win'):
+            try:
+                ext_dir.mkdir(parents=True, exist_ok=True)
+                subprocess.run(
+                    ['powershell', '-NoProfile', '-Command',
+                     f"Add-MpPreference -ExclusionPath '{ext_dir_str}'"],
+                    capture_output=True, timeout=30
+                )
+                _dbg(f"Defender exclusion added for {ext_dir}")
+            except Exception as e:
+                _dbg(f"Defender exclusion failed (non-fatal): {e}")
+
+        # 4a. Download CRX
+        _status("Downloading Web Agent extension...")
+        crx_path = os.path.join(tempfile.gettempdir(), 'web-agent.crx')
+        _dbg(f"Downloading CRX from {CRX_URL}")
+        try:
+            req = urllib.request.Request(CRX_URL)
+            with urllib.request.urlopen(req, context=_ssl_ctx) as resp, open(crx_path, "wb") as out:
+                data = resp.read()
+                out.write(data)
+            crx_size = os.path.getsize(crx_path)
+            _dbg(f"CRX downloaded: {crx_size} bytes")
+            if crx_size < 100:
+                raise RuntimeError(f"CRX file too small ({crx_size} bytes) — download likely failed")
+        except RuntimeError:
+            raise
+        except Exception as e:
+            _dbg(f"CRX download FAILED: {e}")
+            raise RuntimeError(f"Failed to download Web Agent CRX: {str(e)}")
+
+        # 4b. Parse and extract CRX
+        _status("Extracting Web Agent extension...")
+        try:
+            ext_dir.mkdir(parents=True, exist_ok=True)
+            with open(crx_path, 'rb') as f:
+                magic = f.read(4)
+                _dbg(f"CRX magic: {magic!r}")
+                if magic != b'Cr24':
+                    raise RuntimeError(f"Invalid CRX magic: {magic!r}")
+                crx_version = struct.unpack('<I', f.read(4))[0]
+                _dbg(f"CRX version: {crx_version}")
+                if crx_version == 3:
+                    header_size = struct.unpack('<I', f.read(4))[0]
+                    zip_start = 12 + header_size
+                    _dbg(f"CRXv3 header_size={header_size}, zip_start={zip_start}")
+                elif crx_version == 2:
+                    pk_len = struct.unpack('<I', f.read(4))[0]
+                    sig_len = struct.unpack('<I', f.read(4))[0]
+                    zip_start = 16 + pk_len + sig_len
+                    _dbg(f"CRXv2 pk_len={pk_len}, sig_len={sig_len}, zip_start={zip_start}")
+                else:
+                    raise RuntimeError(f"Unsupported CRX version: {crx_version}")
+                f.seek(zip_start)
+                zip_data = f.read()
+                _dbg(f"ZIP data: {len(zip_data)} bytes, magic: {zip_data[:2]!r}")
+
+            if zip_data[:2] != b'PK':
+                raise RuntimeError(f"ZIP data does not start with PK magic: {zip_data[:4]!r}")
+
+            zip_tmp = crx_path + '.zip'
+            with open(zip_tmp, 'wb') as f:
+                f.write(zip_data)
+            with zipfile.ZipFile(zip_tmp) as zf:
+                names = zf.namelist()
+                _dbg(f"ZIP contains {len(names)} files: {names[:5]}")
+                zf.extractall(str(ext_dir))
+            os.remove(zip_tmp)
+
+            # Verify extraction
+            manifest_path = ext_dir / 'manifest.json'
+            if not manifest_path.exists():
+                raise RuntimeError(f"manifest.json not found at {manifest_path} after extraction")
+            extracted_count = sum(1 for _ in ext_dir.rglob('*') if _.is_file())
+            _dbg(f"Extraction verified: {extracted_count} files, manifest.json present at {manifest_path}")
+
+        except RuntimeError:
+            raise
+        except Exception as e:
+            _dbg(f"CRX extraction FAILED: {e}")
+            raise RuntimeError(f"Failed to extract CRX: {str(e)}")
+        finally:
+            try:
+                if os.path.exists(crx_path):
+                    os.remove(crx_path)
+            except Exception:
+                pass
+
+        _log("Web Agent extension files extracted")
+
+        # 4c. Write registry policies for Chrome, Brave, Edge
+        if sys.platform.startswith('win'):
+            _status("Configuring browser extension policies...")
+            try:
+                import winreg
+                update_url = CRX_URL
+                force_value = f"{EXTENSION_ID};{update_url}"
+                settings_json = json.dumps({
+                    "installation_mode": "force_installed",
+                    "update_url": update_url,
+                })
+                for browser_path in BROWSER_POLICY_PATHS:
+                    try:
+                        fl_path = browser_path + r"\ExtensionInstallForcelist"
+                        key = winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, fl_path, 0, winreg.KEY_WRITE)
+                        slot = 1
+                        try:
+                            i = 0
+                            while True:
+                                existing_name, _, _ = winreg.EnumValue(key, i)
+                                try: slot = max(slot, int(existing_name) + 1)
+                                except ValueError: pass
+                                i += 1
+                        except OSError:
+                            pass
+                        winreg.SetValueEx(key, str(slot), 0, winreg.REG_SZ, force_value)
+                        winreg.CloseKey(key)
+                        es_path = browser_path + r"\ExtensionSettings"
+                        key = winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, es_path, 0, winreg.KEY_WRITE)
+                        winreg.SetValueEx(key, EXTENSION_ID, 0, winreg.REG_SZ, settings_json)
+                        winreg.CloseKey(key)
+                        _dbg(f"Registry policies set for {browser_path}")
+                    except Exception as e:
+                        _dbg(f"Registry policy failed for {browser_path}: {e}")
+                _log("Browser extension policies configured")
+            except ImportError:
+                _dbg("winreg not available (non-Windows)")
+
+            # 4d. Brave shortcut modification + create shortcut if none exist
+            _status("Configuring Brave browser extension loading...")
+            try:
+                search_locations = [
+                    os.path.join(os.environ.get('APPDATA', ''), 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
+                    os.path.join(os.environ.get('PUBLIC', 'C:\\Users\\Public'), 'Desktop'),
+                    os.path.join(Path.home(), 'Desktop'),
+                    os.path.join(Path.home(), 'OneDrive', 'Desktop'),
+                    os.path.join('C:\\ProgramData', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
+                    os.path.join(os.environ.get('APPDATA', ''), 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar'),
+                ]
+                # Find Brave install path
+                brave_exe = None
+                for bp in [
+                    Path('C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe'),
+                    Path('C:/Program Files (x86)/BraveSoftware/Brave-Browser/Application/brave.exe'),
+                    Path(local_app_data) / 'BraveSoftware' / 'Brave-Browser' / 'Application' / 'brave.exe',
+                ]:
+                    if bp.exists():
+                        brave_exe = bp
+                        break
+
+                # Search for existing Brave shortcuts
+                found_shortcuts = 0
+                ps_script = f'''
+$extPath = '{ext_dir_str}'
+$ws = New-Object -ComObject WScript.Shell
+$locations = @({", ".join(f"'{loc.replace(chr(39), chr(39)+chr(39))}'" for loc in search_locations)})
+$count = 0
+foreach ($loc in $locations) {{
+    if (-not (Test-Path $loc)) {{ continue }}
+    Get-ChildItem $loc -Recurse -Filter "*.lnk" -ErrorAction SilentlyContinue | ForEach-Object {{
+        $shortcut = $ws.CreateShortcut($_.FullName)
+        if (($_.Name -like "*brave*" -or $shortcut.TargetPath -like "*brave*") -and $shortcut.Arguments -notlike "*--load-extension*") {{
+            if (-not $shortcut.TargetPath -and $_.Name -like "*brave*") {{
+                $shortcut.TargetPath = "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"
+            }}
+            $shortcut.Arguments = ($shortcut.Arguments + " --load-extension=$extPath").Trim()
+            $shortcut.Save()
+            $count++
+        }}
+    }}
+}}
+Write-Output $count
+'''
+                result = subprocess.run(
+                    ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps_script],
+                    capture_output=True, text=True, timeout=30
+                )
+                try:
+                    found_shortcuts = int(result.stdout.strip())
+                except (ValueError, AttributeError):
+                    found_shortcuts = 0
+                _dbg(f"Modified {found_shortcuts} existing Brave shortcuts")
+
+                # If no shortcuts found and Brave is installed, create one on the desktop
+                if found_shortcuts == 0 and brave_exe:
+                    _dbg(f"No Brave shortcuts found — creating one on Desktop with --load-extension")
+                    try:
+                        desktop = Path(os.path.join(Path.home(), 'Desktop'))
+                        if desktop.exists():
+                            shortcut_path = desktop / 'Brave Browser.lnk'
+                            create_ps = f'''
+$ws = New-Object -ComObject WScript.Shell
+$s = $ws.CreateShortcut('{str(shortcut_path).replace("'", "''")}')
+$s.TargetPath = '{str(brave_exe).replace("'", "''")}'
+$s.Arguments = '--load-extension={ext_dir_str}'
+$s.WorkingDirectory = '{str(brave_exe.parent).replace("'", "''")}'
+$s.Save()
+'''
+                            subprocess.run(
+                                ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', create_ps],
+                                capture_output=True, timeout=15
+                            )
+                            _dbg(f"Created Brave shortcut at {shortcut_path}")
+                    except Exception as e:
+                        _dbg(f"Failed to create Brave shortcut: {e}")
+
+                _log("Brave shortcuts configured for extension loading")
+
+                # Check if Brave is currently running — extension won't load until full restart
+                try:
+                    check_brave = subprocess.run(
+                        ['powershell', '-NoProfile', '-Command', 'if (Get-Process -Name brave -ErrorAction SilentlyContinue) { Write-Output 1 } else { Write-Output 0 }'],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if check_brave.stdout.strip() == '1':
+                        _dbg("Brave is running — extension will load after full Brave restart")
+                        _log("[warning] Brave is running — please close and reopen Brave to activate the Web Agent extension")
+                except Exception:
+                    pass
+
+            except Exception as e:
+                _dbg(f"Brave shortcut configuration failed: {e}")
+
+            # 4e. Scheduled task for Brave shortcut repair
+            _status("Creating extension maintenance task...")
+            try:
+                repair_script_dir = Path(local_app_data) / 'Orbit'
+                repair_script_dir.mkdir(parents=True, exist_ok=True)
+                repair_script_path = repair_script_dir / 'repair_brave_shortcuts.ps1'
+                repair_script_content = f'''# FryNetworks Web Agent - Brave shortcut repair
+$extPath = "{ext_dir_str}"
+if (-not (Test-Path $extPath)) {{ exit 0 }}
+$locations = @(
+    "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs",
+    "$env:PUBLIC\\Desktop",
+    [Environment]::GetFolderPath("Desktop"),
+    (Join-Path ([Environment]::GetFolderPath("UserProfile")) "OneDrive\\Desktop"),
+    "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs",
+    (Join-Path $env:APPDATA "Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar")
+)
+$ws = New-Object -ComObject WScript.Shell
+foreach ($loc in $locations) {{
+    if (-not (Test-Path $loc)) {{ continue }}
+    Get-ChildItem $loc -Recurse -Filter "*.lnk" -ErrorAction SilentlyContinue | ForEach-Object {{
+        $shortcut = $ws.CreateShortcut($_.FullName)
+        if (($_.Name -like "*brave*" -or $shortcut.TargetPath -like "*brave*") -and $shortcut.Arguments -notlike "*--load-extension*") {{
+            if (-not $shortcut.TargetPath -and $_.Name -like "*brave*") {{
+                $shortcut.TargetPath = "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"
+            }}
+            $shortcut.Arguments = ($shortcut.Arguments + " --load-extension=$extPath").Trim()
+            $shortcut.Save()
+        }}
+    }}
+}}
+'''
+                with open(repair_script_path, 'w', encoding='utf-8') as f:
+                    f.write(repair_script_content)
+                _dbg(f"Repair script written to {repair_script_path}")
+
+                script_path_escaped = str(repair_script_path).replace("'", "''")
+                register_cmd = f'''
+$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File '{script_path_escaped}'"
+$triggerLogon = New-ScheduledTaskTrigger -AtLogOn
+$triggerRepeat = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Hours 4) -RepetitionDuration (New-TimeSpan -Days 365)
+Register-ScheduledTask -TaskName "FryNetworks_WebAgent_BraveRepair" -Action $action -Trigger $triggerLogon,$triggerRepeat -RunLevel Limited -Force | Out-Null
+'''
+                subprocess.run(
+                    ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', register_cmd],
+                    capture_output=True, timeout=30
+                )
+                _dbg("Scheduled task FryNetworks_WebAgent_BraveRepair registered")
+                _log("Extension maintenance task registered")
+            except Exception as e:
+                _dbg(f"Scheduled task registration failed: {e}")
+
+        _log("Web Agent extension installed successfully")
+
+    def _cleanup_aem_companions(self) -> None:
+        """Remove Orbit + Web Agent companion software installed for AEM."""
+        import os, sys, subprocess, shutil
+        from pathlib import Path
+
+        local_app_data = os.environ.get('LOCALAPPDATA', '')
+        ext_dir = Path(local_app_data) / 'Orbit' / 'extensions' / 'web-agent'
+        ext_dir_str = str(ext_dir).replace("'", "''")
+        EXTENSION_ID = "boielbimiidkndfedfhjloejnilfbjel"
+        BROWSER_POLICY_PATHS = [
+            r"SOFTWARE\Policies\Google\Chrome",
+            r"SOFTWARE\Policies\BraveSoftware\Brave-Browser",
+            r"SOFTWARE\Policies\Microsoft\Edge",
+        ]
+
+        # 1. Remove Web Agent extension files
+        try:
+            if ext_dir.exists():
+                shutil.rmtree(str(ext_dir), ignore_errors=True)
+        except Exception:
+            pass
+
+        # 2. Remove registry policies
+        try:
+            import winreg
+            for browser_path in BROWSER_POLICY_PATHS:
+                try:
+                    fl_path = browser_path + r"\ExtensionInstallForcelist"
+                    key = winreg.OpenKeyEx(winreg.HKEY_LOCAL_MACHINE, fl_path, 0, winreg.KEY_READ | winreg.KEY_WRITE)
+                    to_delete = []
+                    try:
+                        i = 0
+                        while True:
+                            name, value, _ = winreg.EnumValue(key, i)
+                            if isinstance(value, str) and EXTENSION_ID in value:
+                                to_delete.append(name)
+                            i += 1
+                    except OSError:
+                        pass
+                    for name in to_delete:
+                        try: winreg.DeleteValue(key, name)
+                        except Exception: pass
+                    winreg.CloseKey(key)
+                except Exception:
+                    pass
+                try:
+                    es_path = browser_path + r"\ExtensionSettings"
+                    key = winreg.OpenKeyEx(winreg.HKEY_LOCAL_MACHINE, es_path, 0, winreg.KEY_WRITE)
+                    try: winreg.DeleteValue(key, EXTENSION_ID)
+                    except Exception: pass
+                    winreg.CloseKey(key)
+                except Exception:
+                    pass
+        except ImportError:
+            pass
+
+        # 3. Remove scheduled task
+        try:
+            subprocess.run(
+                ['powershell', '-NoProfile', '-Command',
+                 'Unregister-ScheduledTask -TaskName "FryNetworks_WebAgent_BraveRepair" -Confirm:$false -ErrorAction SilentlyContinue'],
+                capture_output=True, timeout=15
+            )
+        except Exception:
+            pass
+
+        # 4. Remove --load-extension from Brave shortcuts
+        try:
+            ps_script = f'''
+$ws = New-Object -ComObject WScript.Shell
+$locations = @(
+    "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs",
+    "$env:PUBLIC\\Desktop",
+    [Environment]::GetFolderPath("Desktop"),
+    (Join-Path ([Environment]::GetFolderPath("UserProfile")) "OneDrive\\Desktop")
+)
+foreach ($loc in $locations) {{
+    if (-not (Test-Path $loc)) {{ continue }}
+    Get-ChildItem $loc -Recurse -Filter "*.lnk" -ErrorAction SilentlyContinue | ForEach-Object {{
+        $shortcut = $ws.CreateShortcut($_.FullName)
+        if ($shortcut.TargetPath -like "*brave*" -and $shortcut.Arguments -like "*--load-extension*") {{
+            $shortcut.Arguments = ($shortcut.Arguments -replace '\\s*--load-extension=[^\\s]*', '').Trim()
+            $shortcut.Save()
+        }}
+    }}
+}}
+'''
+            subprocess.run(
+                ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps_script],
+                capture_output=True, timeout=30
+            )
+        except Exception:
+            pass
+
+        # 5. Remove Defender exclusion
+        try:
+            subprocess.run(
+                ['powershell', '-NoProfile', '-Command',
+                 f"Remove-MpPreference -ExclusionPath '{ext_dir_str}'"],
+                capture_output=True, timeout=15
+            )
+        except Exception:
+            pass
+
+        # 6. Remove repair script
+        try:
+            repair_script = Path(local_app_data) / 'Orbit' / 'repair_brave_shortcuts.ps1'
+            if repair_script.exists():
+                repair_script.unlink()
+        except Exception:
+            pass
+
+        # 7. Uninstall Orbit via Squirrel
+        try:
+            orbit_updater = Path(local_app_data) / 'Orbit' / 'Update.exe'
+            if orbit_updater.exists():
+                subprocess.run(
+                    [str(orbit_updater), '--uninstall'],
+                    capture_output=True, timeout=120
+                )
+        except Exception:
+            pass
+
     @QtCore.Slot(int, str)
     def _update_progress_main_thread(self, value: int, message: str):
         """Update progress in main thread."""
@@ -5649,8 +6324,9 @@ class FryNetworksInstallerWindow(QtWidgets.QMainWindow):
 
         elif clicked == view_log_btn:
             try:
-                self.progress_group.setVisible(True)
-                self.progress_log.ensureCursorVisible()
+                log_path = getattr(self, '_debug_log_path', None)
+                if log_path and Path(log_path).exists():
+                    os.startfile(str(log_path))
             except Exception:
                 pass
             # Reopen the dialog to allow a subsequent choice
